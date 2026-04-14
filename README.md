@@ -17,18 +17,14 @@ Haul is a BitTorrent client with a React web UI and a REST API. It's designed to
 
 ## Is this for you?
 
-**Probably yes if:**
-- You're running a homelab and want a torrent client with a modern web UI that doesn't look dated
-- You use or plan to use Pilot / Prism for TV and movie management
-- You want accurate ETAs and reliable dead-torrent handling without manually babysitting grabs
-- You're technical enough to run Docker and edit a config, but you'd rather not spend a weekend writing custom format regex to get your quality profiles right
+Haul is built to be approachable by default and capable when you want it to be. The out-of-the-box defaults are tuned so you can `docker run` it, open the UI, and be downloading inside of a minute — sensible save paths, a working rate tracker, stall detection, and VPN awareness all on from the start. The deeper features are there too: full REST and WebSocket APIs, configurable stall thresholds, per-category save-path templating, webhook event routing, sequential download and piece-priority modes, custom rename formats. They stay out of your way until you turn them on.
 
-**Probably not if:**
-- You're chasing TRaSH Guides-level parity with dozens of tuned custom formats
-- You need private-tracker ratio minimaxing features (seed-priority scheduling, per-tracker upload caps with hour-of-day rules, etc.)
-- You're deeply invested in qBittorrent's plugin ecosystem
+You'll probably like Haul if you:
 
-In short: Haul aims at the 80% of homelab users who want something that works well out of the box, with enough knobs for power users but without the complexity tax.
+- Run a homelab and want a torrent client with a modern web UI that doesn't look dated
+- Use or plan to use Pilot or Prism for TV and movie management
+- Want accurate ETAs and reliable dead-torrent handling without manually babysitting grabs
+- Appreciate sensible defaults now and the option to grow into advanced features later
 
 ## Features
 
