@@ -1,0 +1,96 @@
+# GoReleaser config for Haul
+# https://goreleaser.com
+#
+# Triggered from .github/workflows/release.yml on `v*` tag pushes.
+# Builds cross-platform binaries, archives them, publishes a GitHub
+# Release, and pushes multi-tag docker images to ghcr.io.
+
+version: 2
+
+project_name: haul
+
+before:
+  hooks:
+    - go mod download
+    - sh -c "cd web/ui && npm ci && npm run build"
+
+builds:
+  - id: haul
+    main: ./cmd/haul
+    binary: haul
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/beacon-stack/haul/internal/version.Version={{.Version}}
+      - -X github.com/beacon-stack/haul/internal/version.BuildTime={{.Date}}
+      - -X github.com/beacon-stack/haul/internal/version.Commit={{.FullCommit}}
+
+archives:
+  - id: haul
+    ids: [haul]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else }}{{ .Arch }}{{ end }}
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - LICENSE
+      - README.md
+      - config.example.yaml
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - '^docs:'
+      - '^chore:'
+      - '^test:'
+      - '^ci:'
+      - '(?i)merge pull request'
+
+dockers:
+  - image_templates:
+      - 'ghcr.io/beacon-stack/haul:{{ .Version }}'
+      - 'ghcr.io/beacon-stack/haul:v{{ .Major }}.{{ .Minor }}'
+      - 'ghcr.io/beacon-stack/haul:v{{ .Major }}'
+      - 'ghcr.io/beacon-stack/haul:latest'
+    dockerfile: docker/Dockerfile
+    use: buildx
+    goos: linux
+    goarch: amd64
+    build_flag_templates:
+      - '--pull'
+      - '--platform=linux/amd64'
+      - '--label=org.opencontainers.image.title=haul'
+      - '--label=org.opencontainers.image.description=Self-hosted BitTorrent client for the Beacon media stack'
+      - '--label=org.opencontainers.image.source=https://github.com/beacon-stack/haul'
+      - '--label=org.opencontainers.image.version={{ .Version }}'
+      - '--label=org.opencontainers.image.revision={{ .FullCommit }}'
+      - '--label=org.opencontainers.image.licenses=MIT'
+
+release:
+  github:
+    owner: beacon-stack
+    name: haul
+  draft: false
+  prerelease: auto
+  name_template: 'v{{ .Version }}'
