@@ -1,0 +1,43 @@
+name: Feature request
+description: Suggest something new
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Feature requests are welcome. Before opening one, search existing issues to see if it's already been discussed.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the workflow or situation that prompted this request. "I want X" is less useful than "when I do Y, I have to Z which is painful because…"
+      placeholder: "When running Haul behind a VPN, I have to manually..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What would the feature look like? UI mockup, API shape, config option — whatever helps communicate the idea.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've considered
+      description: Other ways to solve the problem, including workarounds you're currently using.
+
+  - type: dropdown
+    id: parity
+    attributes:
+      label: Is this a feature from another BitTorrent client?
+      description: Helps us prioritise parity with familiar tools.
+      options:
+        - "Yes — qBittorrent has this"
+        - "Yes — Deluge has this"
+        - "Yes — Transmission has this"
+        - "No — it's a new idea"
+        - "Not sure"
