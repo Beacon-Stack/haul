@@ -6,7 +6,7 @@ require (
 	github.com/anacrolix/dht/v2 v2.23.0
 	github.com/anacrolix/publicip v0.3.1
 	github.com/anacrolix/torrent v1.61.0
-	github.com/beacon-stack/pulse v0.0.0-00010101000000-000000000000
+	github.com/beacon-stack/pulse v0.1.0
 	github.com/coder/websocket v1.8.14
 	github.com/danielgtaylor/huma/v2 v2.37.3
 	github.com/go-chi/chi/v5 v5.2.5
@@ -118,5 +118,3 @@ require (
 	modernc.org/sqlite v1.48.1 // indirect
 	zombiezen.com/go/sqlite v0.13.1 // indirect
 )
-
-replace github.com/beacon-stack/pulse => /home/davidfic/dev/beacon/pulse
