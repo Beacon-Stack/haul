@@ -1,0 +1,99 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg-base:     #0c0c11;
+  --color-bg-surface:  #16161e;
+  --color-bg-elevated: #1e1e2a;
+  --color-bg-subtle:   #2a2a3a;
+
+  --color-border-subtle:  #ffffff18;
+  --color-border-default: #ffffff28;
+  --color-border-strong:  #ffffff48;
+
+  --color-accent:         #4da6ff;
+  --color-accent-hover:   #6bb8ff;
+  --color-accent-muted:   color-mix(in srgb, #4da6ff 14%, transparent);
+  --color-accent-fg:      #ffffff;
+
+  --color-text-primary:   #eeeef3;
+  --color-text-secondary: #a8a8c0;
+  --color-text-muted:     #6e6e8a;
+
+  /* ── Torrent status colors ─────────────────────────────────────────────────
+     Each state has a unique colour with no overlap. The frontend reads these
+     via the canonical helper in lib/torrentStatus.ts — never inline.
+
+       downloading → blue   (the healthy default)
+       stalled     → red    (no activity for backend's stall_timeout)
+       seeding     → green  (bright, "actively uploading")
+       completed   → forest (deeper green, "done at rest" — same family as
+                             seeding so the user reads "both finished" but the
+                             intensity gap signals active vs idle)
+       paused      → orange (user-initiated pause)
+       queued      → purple (waiting to start)
+       failed      → red    (error)
+  */
+  --color-status-downloading: #3b9eff;
+  --color-status-seeding:     #34d399;
+  --color-status-completed:   #15803d;
+  --color-status-failed:      #f87171;
+  --color-status-queued:      #a78bfa;
+  --color-status-paused:      #fb923c;
+  --color-status-stalled:     #f87171;
+
+  --color-danger:  #f87171;
+  --color-warning: #fbbf24;
+  --color-success: #34d399;
+  --color-info:    #3b9eff;
+
+  --font-family-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --font-family-mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  --shadow-card:  0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.7);
+}
+
+@layer base {
+  html {
+    background-color: var(--color-bg-base);
+    color: var(--color-text-primary);
+    font-family: var(--font-family-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    min-height: 100vh;
+    margin: 0;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-border-default);
+    border-radius: 3px;
+  }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-elevated) 25%,
+    var(--color-bg-subtle) 50%,
+    var(--color-bg-elevated) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

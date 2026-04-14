@@ -1,0 +1,32 @@
+server:
+  host: "0.0.0.0"
+  port: 8484
+
+database:
+  driver: sqlite
+  # path: ~/.config/haul/haul.db
+
+log:
+  level: info
+  format: json
+
+# auth:
+#   api_key: "your-api-key-here"
+
+torrent:
+  # listen_port: 0  # 0 = random
+  # download_dir: ~/Downloads
+  # max_active_downloads: 5
+  # max_active_uploads: 0  # 0 = unlimited
+  # global_download_limit: 0  # bytes/s, 0 = unlimited
+  # global_upload_limit: 0
+  # default_seed_ratio: 0  # 0 = unlimited
+  # default_seed_time: 0  # seconds, 0 = unlimited
+  enable_dht: true
+  enable_pex: true
+  enable_utp: true
+  encryption: prefer  # prefer, require, or disable
+
+# pulse:
+#   url: "http://localhost:9696"
+#   api_key: "pulse-api-key"
