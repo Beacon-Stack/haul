@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">Haul</h1>
-  <p align="center">A clean, modern BitTorrent client for your home server.</p>
+  <p align="center">A self-hosted BitTorrent client for home servers and the Beacon media stack.</p>
 </p>
 <p align="center">
   <a href="https://github.com/beacon-stack/haul/blob/main/LICENSE"><img src="https://img.shields.io/github/license/beacon-stack/haul" alt="License"></a>
@@ -13,31 +13,39 @@
 
 ---
 
-Haul downloads torrents. It has a simple web UI, runs in a single Docker container, and gets out of your way. If you're building a self-hosted media setup with [Pilot](https://github.com/beacon-stack/pilot), [Prism](https://github.com/beacon-stack/prism), or the rest of the Beacon stack, Haul is the piece that actually pulls the bytes down.
+Haul is a BitTorrent client with a React web UI and a REST API. It's designed to drop into a Sonarr/Radarr-style pipeline — specifically [Pilot](https://github.com/beacon-stack/pilot) and [Prism](https://github.com/beacon-stack/prism) — but it runs fine on its own as a standalone client. It's built on [anacrolix/torrent](https://github.com/anacrolix/torrent), runs as a single Go binary, stores state in Postgres, and is configured from the UI or through environment variables.
 
-It also runs fine on its own if you just want a torrent client with a nice UI.
+## Is this for you?
 
-## Why does this exist?
+**Probably yes if:**
+- You're running a homelab and want a torrent client with a modern web UI that doesn't look dated
+- You use or plan to use Pilot / Prism for TV and movie management
+- You want accurate ETAs and reliable dead-torrent handling without manually babysitting grabs
+- You're technical enough to run Docker and edit a config, but you'd rather not spend a weekend writing custom format regex to get your quality profiles right
 
-You'd be right to ask — qBittorrent, Deluge, and Transmission are all good. Haul exists because the Beacon stack needed a torrent client that knows how to talk to TV and movie managers directly: it understands when a torrent is actually "Season 2 Episode 5 of this show," it renames the file sensibly when the download completes, and it tells the manager when a torrent has gone dead so the manager can move on to the next one instead of retrying the same bad release forever.
+**Probably not if:**
+- You're chasing TRaSH Guides-level parity with dozens of tuned custom formats
+- You need private-tracker ratio minimaxing features (seed-priority scheduling, per-tracker upload caps with hour-of-day rules, etc.)
+- You're deeply invested in qBittorrent's plugin ecosystem
 
-If you're not running a media stack, Haul still works — you get a clean modern web UI, sensible defaults, and ETAs that match reality. But that's the bonus, not the pitch. The pitch is: it's the missing piece of the Beacon stack.
+In short: Haul aims at the 80% of homelab users who want something that works well out of the box, with enough knobs for power users but without the complexity tax.
 
-## What you get
+## Features
 
-**A web UI that doesn't try too hard.** Live progress, accurate speeds, a piece-by-piece progress bar, peer and tracker details when you want them, everything else tucked behind a click.
-
-**ETAs you can actually trust.** Most torrent clients compute ETA from the wrong number and it jumps all over the place. Haul smooths the download rate over a short window so the number on screen tracks reality. When it says 4 minutes remaining, it means 4 minutes.
-
-**Auto-rename for media.** When Pilot or Prism send Haul a torrent, they include metadata about what the file actually is. Haul uses that to rename completed downloads into `Show Name/Season 02/Show Name - S02E05.mkv`. Toggleable, configurable, off by default if you'd rather handle naming yourself.
-
-**VPN awareness.** Haul checks on startup and periodically thereafter whether it's running inside a VPN tunnel, detects the interface, and verifies the external IP. If the VPN drops, you'll see it in the dashboard — not in a surprise email from your ISP.
-
-**Dead-torrent detection.** If a torrent never finds a peer, or it used to download but has gone silent for a while, Haul classifies it as stalled and publishes the reason. Pilot reads this and automatically moves on to a different release. No more silent retry loops on torrents that were never going to finish.
-
-**Categories and tags.** The usual — categories (movies, tv, linux-isos) route downloads into different save paths, tags let you group things for filtering.
-
-**Prioritization.** Sequential download mode for when you want to start watching before the download finishes. First-and-last-piece priority for media players that peek at file headers. Per-torrent and global rate limits.
+- **Modern React UI**, live-updated over WebSocket — no polling, no stale progress bars
+- **Accurate ETAs.** Rates and time-remaining are computed from a short moving average rather than cumulative totals, so numbers track reality instead of flickering
+- **Categories and tags** with per-category save paths and tag-based filtering
+- **Sequential download mode** for streaming before the torrent finishes
+- **First-and-last-piece priority** for media players that peek at file headers
+- **Rename-on-complete** — when Pilot or Prism grab a torrent and pass through metadata, Haul renames the output into `Show/Season 02/Show - S02E05.mkv` format automatically
+- **Stall detection** with three classification levels. Dead torrents (no peers ever, or gone silent past the timeout) are published to `/api/v1/stalls` so Pilot's stallwatcher can blocklist them before they waste another retry
+- **VPN awareness.** Haul detects whether it's running inside a VPN tunnel and surfaces the external IP in the dashboard — useful for catching VPN drops before they become a problem
+- **Webhooks** filtered by event type (added, completed, stalled, speed update)
+- **Per-torrent and global rate limits**
+- **Magnet URIs, DHT, PEX, µTP**, and crash-safe resume via a persistent piece-completion store
+- **Full REST API** (OpenAPI docs at `/api/docs`) and a WebSocket event stream at `/ws`
+- **Postgres-backed state** for torrents, categories, tags, and settings
+- **Zero telemetry.** No analytics, no crash reporting, no phoning home
 
 ## Getting started
 
@@ -52,15 +60,15 @@ docker run -d \
   ghcr.io/beacon-stack/haul:latest
 ```
 
-Open `http://localhost:8484`. Done.
+The web UI is at `http://localhost:8484`. Haul generates an API key on first run; find it in Settings → System.
 
-### The whole Beacon stack at once
+### Docker Compose (with the rest of the stack)
 
-If you want Haul running alongside Pilot, Prism, Pulse, Postgres, and a VPN container, the full `docker-compose.yml` lives in [`beacon-stack/stack`](https://github.com/beacon-stack/stack). Everything is wired up — you point it at a media directory and go.
+The full Beacon stack — Postgres, Pulse, Pilot, Prism, and Haul behind a VPN container — lives in [`beacon-stack/stack`](https://github.com/beacon-stack/stack). Point it at a media directory and everything's wired up.
 
 ### Build from source
 
-Needs Go 1.25+ and Node 22+.
+Requires Go 1.25+ and Node 22+.
 
 ```bash
 git clone https://github.com/beacon-stack/haul
@@ -72,22 +80,21 @@ make build
 
 ## Configuration
 
-Most settings are editable from the web UI. For the things you'll want to set at container-start time:
+Most settings live in the web UI. For the ones you'll want at container-start time, use environment variables or a YAML config file at `/config/config.yaml` (also searched at `~/.config/haul/config.yaml` and `./config.yaml`).
 
-| Variable | Default | What it does |
+| Variable | Default | Description |
 |---|---|---|
-| `HAUL_SERVER_PORT` | `8484` | Port the web UI and API listen on |
-| `HAUL_TORRENT_LISTEN_PORT` | `6881` | Port your peers connect to |
-| `HAUL_TORRENT_DOWNLOADS_PATH` | `/downloads` | Where downloaded files go |
-| `HAUL_DATABASE_DSN` | — | Postgres connection string (required) |
+| `HAUL_SERVER_PORT` | `8484` | Web UI and API port |
+| `HAUL_TORRENT_LISTEN_PORT` | `6881` | Peer-wire listen port |
+| `HAUL_TORRENT_DOWNLOADS_PATH` | `/downloads` | Default save path |
+| `HAUL_DATABASE_DSN` | — | Postgres DSN (required) |
 | `HAUL_AUTH_API_KEY` | auto | API key; autogenerated on first run if unset |
-| `HAUL_PULSE_URL` | — | Pulse control-plane URL if you're using one |
+| `HAUL_PULSE_URL` | — | Pulse control-plane URL (optional) |
 | `HAUL_TORRENT_RENAME_ON_COMPLETE` | `false` | Rename completed downloads using media metadata |
-| `HAUL_TORRENT_PAUSE_ON_COMPLETE` | `false` | Pause torrents the moment they finish (for ratio-sensitive trackers) |
+| `HAUL_TORRENT_PAUSE_ON_COMPLETE` | `false` | Pause torrents as soon as they finish (for ratio-sensitive trackers) |
+| `HAUL_TORRENT_STALL_TIMEOUT` | `120` | Seconds of inactivity before a torrent is classified as stalled |
 
-A YAML config file works too. Haul looks for `/config/config.yaml`, `~/.config/haul/config.yaml`, and `./config.yaml` in that order.
-
-## Where Haul fits
+## Where Haul fits in the Beacon stack
 
 ```
 ┌──────────┐     ┌──────────┐     ┌──────────┐
@@ -108,31 +115,36 @@ A YAML config file works too. Haul looks for `/config/config.yaml`, `~/.config/h
         downloads/
 ```
 
-Pilot and Prism post torrents to Haul when they grab a release. Haul downloads, renames, and fires a webhook when it's done. Pilot polls Haul's stall endpoint to catch torrents it can stop waiting on.
+Pilot and Prism POST to `/api/v1/torrents` when they grab a release, passing through media metadata so Haul can rename on completion. Haul fires webhooks on completion and publishes stall events to `/api/v1/stalls`, which Pilot polls to blocklist dead torrents automatically.
 
-None of this is required for Haul to work. You can run it on its own and never touch the rest of the Beacon stack.
+You can run Haul standalone and ignore the rest — the media-manager integration is opt-in via the `rename_on_complete` setting and the upstream service passing metadata.
 
-## For power users
+## Power user notes
 
-**[anacrolix/torrent](https://github.com/anacrolix/torrent) under the hood.** Haul is a service layer on top of anacrolix/torrent, which is the most actively maintained BitTorrent library in Go. You get DHT, PEX, µTP, magnet URIs, and crash-safe resumable downloads via a persistent piece-completion store. Haul adds everything that's normally left to the caller: save-path routing, rename pipelines, stall classification, webhooks, and an API.
+A few things worth knowing if you want to go deeper than the UI:
 
-**Honest rate calculation.** anacrolix exposes cumulative byte counters. Treating those as a rate (which is what the previous version of Haul did, before the fix) produces nonsense ETAs. Haul now samples the counters on every API request and runs them through an exponential moving average with a 5-second time constant. Gaps longer than 30 seconds reset the tracker so you don't extrapolate from stale data. The code lives in `internal/core/torrent/session.go` if you want to tune it.
+**Rate tracker.** anacrolix/torrent exposes cumulative byte counters, not rates. Haul samples those counters on each API request and pushes them through an exponential moving average with a 5-second time constant. Gaps over 30 seconds reset the tracker to avoid extrapolating from stale data. The math lives in `internal/core/torrent/session.go` — tweak the time constant there if the default feels too slow or too twitchy for your connection.
 
-**Stall classification.** Three levels. A torrent that's never seen a peer after a grace period is `no_peers_ever`. One that was active but has gone dark past the stall timeout is `activity_lost`. Anything above level 1 is published to `/api/v1/stalls` so external services can blocklist it. The full state machine and regression tests are in `internal/core/torrent/stall.go` and `stall_test.go`.
+**Stall classification.** Three-level state machine in `internal/core/torrent/stall.go`:
+- `no_peers_ever` — torrent has never seen a peer after the grace period
+- `activity_lost` — bytes were flowing, but nothing has changed past the stall timeout
+- `complete_but_no_activity` — finished but hasn't uploaded anything recently (useful for ratio-enforcing trackers)
 
-**REST API + WebSocket.** Everything the UI does is available via the REST API — OpenAPI docs at `/api/docs` — plus a WebSocket at `/ws` for live events. The UI is just a client, not a separate admin surface.
+Anything above level 1 shows up on `/api/v1/stalls`.
 
-**Webhooks.** HTTP callbacks filtered by event type: torrent added, torrent completed, speed updates, stall detected. Useful if you want to trigger something downstream without polling.
+**Regression suite.** Haul has been bitten by dead-torrent bugs often enough that there's a locked-in test suite covering the failure modes. `make test` runs it in under two seconds. If you're editing the session wiring, stall detection, or the rate tracker, the suite will catch regressions before they ship. See [CLAUDE.md](CLAUDE.md) for the guarded files.
 
-**Regression suite.** Haul has a hard-won test suite that covers the dead-torrent failure modes it's shipped in the past. `make test` runs the whole thing in under two seconds. If you're editing the torrent session, stall detection, or the rate tracker, the tests will yell at you before the bug hits production. See [CLAUDE.md](CLAUDE.md) for the list of files guarded by the suite and why.
+**Webhooks.** Configure HTTP callbacks filtered by event type. Payloads are the same shape as the WebSocket events, so you can reuse your event handler code.
+
+**API surface.** The REST API is complete — anything the UI does is available over HTTP. Interactive docs at `/api/docs`. The Go client lives in `pkg/sdk` if you want to integrate from another Go service.
 
 ## Privacy
 
-Haul talks to peers, trackers, and the optional Pulse URL you configure. That's the complete list of outbound connections. No telemetry, no crash reporting, no analytics, no update checks. Your API key and any credentials stay in your local database.
+Haul makes outbound connections only to peers, trackers, and the optional Pulse URL you configure. No telemetry, no analytics, no crash reporting, no update checks. API keys and credentials stay in your local database.
 
 ## Built with Claude
 
-Haul was built by one person with a lot of help from [Claude](https://claude.ai) (Anthropic). The architecture decisions, the bug triage, and the writing you're reading now are mine. The keystrokes are often not. If something in the code or this README doesn't make sense, that's a bug worth reporting — [open an issue](https://github.com/beacon-stack/haul/issues).
+Haul was built by one person with extensive help from [Claude](https://claude.ai) (Anthropic). Architecture, design decisions, bug triage, and this README are mine. Many of the keystrokes are not. If something in the code or the docs doesn't make sense, that's a bug worth reporting — [open an issue](https://github.com/beacon-stack/haul/issues).
 
 ## Development
 
