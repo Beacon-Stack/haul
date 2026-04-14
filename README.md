@@ -1,6 +1,6 @@
 <p align="center">
   <h1 align="center">Haul</h1>
-  <p align="center">A self-hosted BitTorrent download client built for the Beacon media stack.</p>
+  <p align="center">A clean, modern BitTorrent client for your home server.</p>
 </p>
 <p align="center">
   <a href="https://github.com/beacon-stack/haul/blob/main/LICENSE"><img src="https://img.shields.io/github/license/beacon-stack/haul" alt="License"></a>
@@ -13,61 +13,35 @@
 
 ---
 
-**Haul** is a BitTorrent download client with a React web UI and a REST API, built to be driven by [Pilot](https://github.com/beacon-stack/pilot) and [Prism](https://github.com/beacon-stack/prism). It wraps [anacrolix/torrent](https://github.com/anacrolix/torrent) with the service-level concerns that library intentionally leaves out: category-based save paths, stall detection with failure-reason hand-off, webhooks, rate-smoothed ETAs, and a rename-on-complete pipeline that understands TV and movie metadata.
+Haul downloads torrents. It has a simple web UI, runs in a single Docker container, and gets out of your way. If you're building a self-hosted media setup with [Pilot](https://github.com/beacon-stack/pilot), [Prism](https://github.com/beacon-stack/prism), or the rest of the Beacon stack, Haul is the piece that actually pulls the bytes down.
 
-You can also run it on its own as a standalone qBittorrent-ish client if you just want a clean modern web UI and don't need the rest of the Beacon stack.
+It also runs fine on its own if you just want a torrent client with a nice UI.
 
-## Features
+## Why does this exist?
 
-**Torrenting**
+You'd be right to ask — qBittorrent, Deluge, and Transmission are all good. Haul exists because the Beacon stack needed a torrent client that knows how to talk to TV and movie managers directly: it understands when a torrent is actually "Season 2 Episode 5 of this show," it renames the file sensibly when the download completes, and it tells the manager when a torrent has gone dead so the manager can move on to the next one instead of retrying the same bad release forever.
 
-- Full anacrolix/torrent session with persistent piece-completion store — torrents resume correctly across container restarts
-- DHT, PEX, µTP, and HTTP/magnet-URL adds
-- Public tracker bootstrap for torrents that arrive trackerless
-- IP blocklist support
-- Per-torrent and global upload/download rate limiting
-- Sequential download mode for preview/streaming
-- First/last piece priority for media players
-- Categories with save-path templating
-- Tags for filtering and routing
+If you're not running a media stack, Haul still works — you get a clean modern web UI, sensible defaults, and ETAs that match reality. But that's the bonus, not the pitch. The pitch is: it's the missing piece of the Beacon stack.
 
-**Operations**
+## What you get
 
-- Stall detection classifies dead-torrent failure modes (`no_peers_ever`, `activity_lost`, etc.) and surfaces them on a `/api/v1/stalls` endpoint that Pilot's stallwatcher consumes for automatic blocklisting
-- Rate tracker smooths anacrolix's cumulative byte counters into real bytes-per-second values using an exponential moving average with a 5-second time constant, producing qBittorrent-parity download rate and ETA
-- Webhook dispatcher with per-event filters
-- VPN health check — detects tunnel interfaces and external IP to confirm traffic is egressing through the VPN
-- Rename-on-complete for TV and movies, fed by Pilot or Prism metadata passed through at grab time
-- Pause-on-complete toggle for ratio-limited trackers
-- Graceful shutdown persists in-flight state
+**A web UI that doesn't try too hard.** Live progress, accurate speeds, a piece-by-piece progress bar, peer and tracker details when you want them, everything else tucked behind a click.
 
-**UI**
+**ETAs you can actually trust.** Most torrent clients compute ETA from the wrong number and it jumps all over the place. Haul smooths the download rate over a short window so the number on screen tracks reality. When it says 4 minutes remaining, it means 4 minutes.
 
-- React 19 + Vite frontend embedded in the Go binary via `//go:embed`
-- Torrent list with live progress, speed, ETA, peers, seeds, and status
-- Torrent detail page with files, peers, trackers, and piece bar visualization
-- Categories and tags CRUD
-- Media management settings — rename format, colon replacement, pause-on-complete, verify-on-start
-- Webhook configuration
-- System and health pages
-- WebSocket live updates — no polling
+**Auto-rename for media.** When Pilot or Prism send Haul a torrent, they include metadata about what the file actually is. Haul uses that to rename completed downloads into `Show Name/Season 02/Show Name - S02E05.mkv`. Toggleable, configurable, off by default if you'd rather handle naming yourself.
 
-**Operations**
+**VPN awareness.** Haul checks on startup and periodically thereafter whether it's running inside a VPN tunnel, detects the interface, and verifies the external IP. If the VPN drops, you'll see it in the dashboard — not in a surprise email from your ISP.
 
-- Single static binary, no runtime dependencies
-- Postgres-backed state (torrents, categories, tags, settings)
-- Zero telemetry
-- Auto-generated API key on first run
-- OpenAPI documentation at `/api/docs`
-- Default port 8484
+**Dead-torrent detection.** If a torrent never finds a peer, or it used to download but has gone silent for a while, Haul classifies it as stalled and publishes the reason. Pilot reads this and automatically moves on to a different release. No more silent retry loops on torrents that were never going to finish.
+
+**Categories and tags.** The usual — categories (movies, tv, linux-isos) route downloads into different save paths, tags let you group things for filtering.
+
+**Prioritization.** Sequential download mode for when you want to start watching before the download finishes. First-and-last-piece priority for media players that peek at file headers. Per-torrent and global rate limits.
 
 ## Getting started
 
-### Docker Compose (recommended, as part of the Beacon stack)
-
-The easiest way to run Haul is as part of the full Beacon stack — see [`beacon-stack/stack`](https://github.com/beacon-stack/stack) for the full docker-compose setup with Postgres, Pulse, Pilot, Prism, and Haul behind a VPN container.
-
-### Standalone Docker
+### Docker
 
 ```bash
 docker run -d \
@@ -78,11 +52,15 @@ docker run -d \
   ghcr.io/beacon-stack/haul:latest
 ```
 
-Open `http://localhost:8484`. Haul ships with sensible defaults and a local Postgres fallback for standalone use.
+Open `http://localhost:8484`. Done.
+
+### The whole Beacon stack at once
+
+If you want Haul running alongside Pilot, Prism, Pulse, Postgres, and a VPN container, the full `docker-compose.yml` lives in [`beacon-stack/stack`](https://github.com/beacon-stack/stack). Everything is wired up — you point it at a media directory and go.
 
 ### Build from source
 
-Requires Go 1.25+ and Node.js 22+.
+Needs Go 1.25+ and Node 22+.
 
 ```bash
 git clone https://github.com/beacon-stack/haul
@@ -94,95 +72,83 @@ make build
 
 ## Configuration
 
-Haul works with zero configuration. All settings are editable through the web UI or via environment variables.
+Most settings are editable from the web UI. For the things you'll want to set at container-start time:
 
-### Key environment variables
-
-| Variable | Default | Description |
+| Variable | Default | What it does |
 |---|---|---|
-| `HAUL_SERVER_HOST` | `0.0.0.0` | Bind address |
-| `HAUL_SERVER_PORT` | `8484` | HTTP port |
-| `HAUL_DATABASE_DSN` | | Postgres connection string |
-| `HAUL_TORRENT_LISTEN_PORT` | `6881` | Peer-wire listen port |
-| `HAUL_TORRENT_DOWNLOADS_PATH` | `/downloads` | Default save path |
-| `HAUL_TORRENT_STALL_TIMEOUT` | `120` | Seconds of inactivity before a torrent is classified as stalled |
-| `HAUL_TORRENT_RENAME_ON_COMPLETE` | `false` | Rename downloaded files using Pilot/Prism metadata on completion |
-| `HAUL_TORRENT_PAUSE_ON_COMPLETE` | `false` | Pause torrents when they finish downloading |
-| `HAUL_AUTH_API_KEY` | auto-generated | API key for external access |
-| `HAUL_PULSE_URL` | | Pulse control-plane URL (optional) |
+| `HAUL_SERVER_PORT` | `8484` | Port the web UI and API listen on |
+| `HAUL_TORRENT_LISTEN_PORT` | `6881` | Port your peers connect to |
+| `HAUL_TORRENT_DOWNLOADS_PATH` | `/downloads` | Where downloaded files go |
+| `HAUL_DATABASE_DSN` | — | Postgres connection string (required) |
+| `HAUL_AUTH_API_KEY` | auto | API key; autogenerated on first run if unset |
+| `HAUL_PULSE_URL` | — | Pulse control-plane URL if you're using one |
+| `HAUL_TORRENT_RENAME_ON_COMPLETE` | `false` | Rename completed downloads using media metadata |
+| `HAUL_TORRENT_PAUSE_ON_COMPLETE` | `false` | Pause torrents the moment they finish (for ratio-sensitive trackers) |
 
-### Config file
+A YAML config file works too. Haul looks for `/config/config.yaml`, `~/.config/haul/config.yaml`, and `./config.yaml` in that order.
 
-Haul looks for `config.yaml` in `/config/config.yaml`, `~/.config/haul/config.yaml`, `/etc/haul/config.yaml`, or `./config.yaml` (in that order).
-
-## Where Haul fits in the Beacon stack
+## Where Haul fits
 
 ```
 ┌──────────┐     ┌──────────┐     ┌──────────┐
 │  Pilot   │     │  Prism   │     │  Pulse   │
-│   (TV)   │     │ (Movies) │     │ (control │
+│   (TV)   │     │ (movies) │     │ (control │
 │          │     │          │     │  plane)  │
 └────┬─────┘     └────┬─────┘     └────┬─────┘
      │                │                │
      │ grab torrent   │ grab torrent   │
      ▼                ▼                │
-     ┌───────────────────────┐         │
-     │        Haul           │◄────────┘
-     │   (BitTorrent)        │  stall events,
-     │                       │  webhook callbacks
-     └───────────┬───────────┘
-                 │
-                 ▼
-             downloads/
+┌───────────────────────┐              │
+│        Haul           │◄─────────────┘
+│   (BitTorrent)        │  optional:
+│                       │  stall events, webhooks
+└───────────┬───────────┘
+            │
+            ▼
+        downloads/
 ```
 
-Pilot and Prism grab releases by pushing a `POST /api/v1/torrents` to Haul. Haul downloads, renames using metadata the parent service passed through, and publishes a webhook when the torrent completes. Pilot's stallwatcher polls `/api/v1/stalls` to catch dead torrents and blocklist them before they waste another retry.
+Pilot and Prism post torrents to Haul when they grab a release. Haul downloads, renames, and fires a webhook when it's done. Pilot polls Haul's stall endpoint to catch torrents it can stop waiting on.
 
-You can also use Haul standalone — none of the Beacon-specific features are mandatory.
+None of this is required for Haul to work. You can run it on its own and never touch the rest of the Beacon stack.
+
+## For power users
+
+**[anacrolix/torrent](https://github.com/anacrolix/torrent) under the hood.** Haul is a service layer on top of anacrolix/torrent, which is the most actively maintained BitTorrent library in Go. You get DHT, PEX, µTP, magnet URIs, and crash-safe resumable downloads via a persistent piece-completion store. Haul adds everything that's normally left to the caller: save-path routing, rename pipelines, stall classification, webhooks, and an API.
+
+**Honest rate calculation.** anacrolix exposes cumulative byte counters. Treating those as a rate (which is what the previous version of Haul did, before the fix) produces nonsense ETAs. Haul now samples the counters on every API request and runs them through an exponential moving average with a 5-second time constant. Gaps longer than 30 seconds reset the tracker so you don't extrapolate from stale data. The code lives in `internal/core/torrent/session.go` if you want to tune it.
+
+**Stall classification.** Three levels. A torrent that's never seen a peer after a grace period is `no_peers_ever`. One that was active but has gone dark past the stall timeout is `activity_lost`. Anything above level 1 is published to `/api/v1/stalls` so external services can blocklist it. The full state machine and regression tests are in `internal/core/torrent/stall.go` and `stall_test.go`.
+
+**REST API + WebSocket.** Everything the UI does is available via the REST API — OpenAPI docs at `/api/docs` — plus a WebSocket at `/ws` for live events. The UI is just a client, not a separate admin surface.
+
+**Webhooks.** HTTP callbacks filtered by event type: torrent added, torrent completed, speed updates, stall detected. Useful if you want to trigger something downstream without polling.
+
+**Regression suite.** Haul has a hard-won test suite that covers the dead-torrent failure modes it's shipped in the past. `make test` runs the whole thing in under two seconds. If you're editing the torrent session, stall detection, or the rate tracker, the tests will yell at you before the bug hits production. See [CLAUDE.md](CLAUDE.md) for the list of files guarded by the suite and why.
 
 ## Privacy
 
-Haul makes outbound connections only to peers (BitTorrent), trackers, and the optional Pulse URL you configure. No telemetry, no analytics, no crash reporting, no update checks. Credentials and API keys are stored in your local database only.
+Haul talks to peers, trackers, and the optional Pulse URL you configure. That's the complete list of outbound connections. No telemetry, no crash reporting, no analytics, no update checks. Your API key and any credentials stay in your local database.
 
-## Project structure
+## Built with Claude
 
-```
-cmd/haul/                 Entry point
-internal/
-  api/                    HTTP router, middleware, v1 handlers, WebSocket hub
-  config/                 Configuration loading (Viper + env vars)
-  core/
-    category/             Category CRUD + save-path templating
-    renamer/              TV/movie rename pipeline
-    tag/                  Tag CRUD
-    torrent/              anacrolix session wrapper, stall detection, rate tracker, webhooks
-  db/                     Migrations and generated query code (sqlc)
-  events/                 In-process event bus
-  pulse/                  Optional Pulse control-plane integration
-  version/                Build-time version info
-web/
-  embed.go                Go embed for serving the SPA
-  static/                 Built frontend assets
-  ui/                     React 19 + TypeScript + Vite source
-```
+Haul was built by one person with a lot of help from [Claude](https://claude.ai) (Anthropic). The architecture decisions, the bug triage, and the writing you're reading now are mine. The keystrokes are often not. If something in the code or this README doesn't make sense, that's a bug worth reporting — [open an issue](https://github.com/beacon-stack/haul/issues).
 
 ## Development
 
 ```bash
-make build         # compile binary to bin/haul
-make run           # build + run
-make dev           # hot reload with air
-make test          # go test ./...
-make check         # golangci-lint + tsc --noEmit
-make sqlc          # regenerate SQLC code
+make build    # compile to bin/haul
+make run      # build + run
+make dev      # hot reload (requires air)
+make test     # go test ./...
+make check    # golangci-lint + tsc --noEmit
+make sqlc     # regenerate sqlc code
 ```
-
-The full regression suite runs in under 2 seconds and locks in the dead-torrent failure modes the project has regressed into in the past — see [CLAUDE.md](CLAUDE.md) for the guarded files and rationale.
 
 ## Contributing
 
-Bug reports, feature requests, and pull requests are welcome. Please open an issue before starting large changes.
+Bug reports, feature requests, and pull requests are welcome. Please open an issue before starting anything large.
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
