@@ -53,6 +53,7 @@ Thumbs.db
 web/ui/node_modules/
 web/ui/.vite/
 web/ui/coverage/
+web/ui/tsconfig.tsbuildinfo
 
 # Built frontend — embedded into the Go binary via //go:embed.
 # Committed so `go build` works without requiring `npm run build` first;
