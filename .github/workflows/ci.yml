@@ -55,7 +55,10 @@ jobs:
         run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
       - name: Run golangci-lint
-        run: golangci-lint run
+        # haul's package graph (anacrolix/torrent + dht + DHT transitive deps)
+        # is large enough that the default 1m context-load timeout sometimes
+        # trips with "JSON decoding failed: unexpected EOF". Bump to 5m.
+        run: golangci-lint run --timeout=5m
 
   build:
     name: Build
