@@ -17,8 +17,8 @@
     "noFallthroughCasesInSwitch": true,
     "paths": {
       "@/*": ["./src/*"],
-      "@beacon-shared/*": ["../../../web-shared/*"]
+      "@beacon-shared/*": ["./src/shared/*"]
     }
   },
-  "include": ["src", "../../../web-shared/**/*"]
+  "include": ["src"]
 }
