@@ -8,8 +8,11 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "@beacon-shared": path.resolve(__dirname, "../../../web-shared"),
-      // Force React singleton. See pilot/web/ui/vite.config.ts for context.
+      // Shared React components are vendored from beacon-stack/web-shared
+      // via `git subtree add --prefix=web/ui/src/shared` and sync upstream
+      // bugfixes with `git subtree pull`.
+      "@beacon-shared": path.resolve(__dirname, "./src/shared"),
+      // Force React singleton. Kept as free insurance even after vendoring.
       react: path.resolve(__dirname, "node_modules/react"),
       "react-dom": path.resolve(__dirname, "node_modules/react-dom"),
     },
