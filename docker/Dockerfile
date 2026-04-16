@@ -1,55 +1,61 @@
 # ── Frontend build stage ──────────────────────────────────────────────────────
 FROM node:22-alpine AS frontend
 
-WORKDIR /app/web/ui
+WORKDIR /app
 
-COPY haul/web/ui/package.json haul/web/ui/package-lock.json ./
-RUN npm ci
+# Copy the frontend package files first so the dependency install layer
+# caches until they change.
+COPY web/ui/package.json web/ui/package-lock.json ./web/ui/
+RUN cd web/ui && npm ci
 
-COPY haul/web/ui/ ./
-
-# Shared UI components (Modal, ConfirmDialog). The tsconfig paths + vite
-# alias resolve `@beacon-shared/*` to `../../../web-shared/*`, and from
-# WORKDIR `/app/web/ui` that's `/web-shared`. Install web-shared's own
-# minimal devDependencies (react + @types/react) so TypeScript can find
-# react types when type-checking files from that directory.
-COPY web-shared/ /web-shared/
-RUN cd /web-shared && npm install --no-audit --no-fund --loglevel=error
-
-RUN npm run build
+# Copy the rest of the frontend source, including the vendored shared
+# components under src/shared/ (git subtree from beacon-stack/web-shared).
+COPY web/ui/ ./web/ui/
+RUN cd web/ui && npm run build
 # Output lands in /app/web/static/
 
 # ── Go build stage ───────────────────────────────────────────────────────────
 FROM golang:1.25-alpine AS builder
 
-RUN apk add --no-cache git
+ARG VERSION=dev
+ARG BUILD_TIME=unknown
 
-WORKDIR /src
+WORKDIR /app
 
-# Copy Pulse SDK (needed for local replace directive)
-COPY pulse/ /pulse/
+# Download dependencies first so the layer caches until go.mod/go.sum change.
+COPY go.mod go.sum ./
+RUN go mod download
 
-# Copy Haul source
-COPY haul/ .
+# Full source after dependency fetch.
+COPY . .
 
-# Overwrite web/static/ with the freshly built frontend
+# Overwrite web/static/ with the freshly-built frontend from the earlier stage.
 COPY --from=frontend /app/web/static/ ./web/static/
 
-# Rewrite the replace directive to point to the copied Pulse module
-RUN sed -i 's|replace github.com/beacon-stack/pulse => .*|replace github.com/beacon-stack/pulse => /pulse|' go.mod
-
-RUN go mod download
-RUN CGO_ENABLED=0 go build -o /haul ./cmd/haul
+# anacrolix/torrent compiles cleanly with CGO_ENABLED=0 for a fully static
+# binary. No cgo dependencies in haul's tree.
+RUN CGO_ENABLED=0 GOOS=linux go build \
+      -ldflags "-X github.com/beacon-stack/haul/internal/version.Version=${VERSION} \
+                -X github.com/beacon-stack/haul/internal/version.BuildTime=${BUILD_TIME} \
+                -s -w" \
+      -o /haul ./cmd/haul
 
 # ── Final stage ───────────────────────────────────────────────────────────────
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata
+# ca-certificates is needed for outbound HTTPS to trackers and indexers.
+# tzdata provides timezone data for correct time display in the UI.
+RUN apk add --no-cache ca-certificates tzdata && \
+    adduser -D -u 1000 haul
 
 COPY --from=builder /haul /usr/local/bin/haul
 
-EXPOSE 8484 6881 6881/udp
-
+# /config holds the local database and settings; /downloads holds torrent data.
 VOLUME ["/config", "/downloads"]
 
-ENTRYPOINT ["haul"]
+# Web UI + API / peer-wire / peer-wire UDP.
+EXPOSE 8484 6881 6881/udp
+
+USER haul
+
+ENTRYPOINT ["/usr/local/bin/haul"]
