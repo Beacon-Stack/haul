@@ -114,18 +114,18 @@ func main() {
 		"utp", cfg.Torrent.EnableUTP,
 	)
 
-	// ── Pulse integration (non-blocking) ──────────────────────────────────
-	go func() {
-		pi, piErr := pulse.New(cfg.Pulse, cfg.Server.Host, cfg.Server.Port, logger)
-		if piErr != nil {
-			logger.Warn("pulse integration failed", "error", piErr)
-		}
-		if pi != nil {
-			// Keep reference for cleanup — but since this is in a goroutine,
-			// we rely on process exit to clean up the heartbeat.
-			_ = pi
-		}
-	}()
+	// ── Pulse integration ─────────────────────────────────────────────────
+	// Registers with Pulse using retry/backoff (~2 minutes). If Pulse is
+	// unreachable, Haul continues in standalone mode. The service API key
+	// is sent during registration so Pilot/Prism can discover and
+	// authenticate with this Haul instance automatically.
+	pulseIntegration, pulseErr := pulse.New(cfg.Pulse, cfg.Server.Host, cfg.Server.Port, cfg.Auth.APIKey.Value(), logger)
+	if pulseErr != nil {
+		logger.Warn("pulse unavailable — running standalone", "error", pulseErr)
+	}
+	if pulseIntegration != nil {
+		defer pulseIntegration.Close()
+	}
 
 	// ── Services ──────────────────────────────────────────────────────────
 	categorySvc := category.NewService(database.SQL)

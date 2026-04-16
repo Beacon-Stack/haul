@@ -16,9 +16,15 @@ type Integration struct {
 	logger *slog.Logger
 }
 
-// New creates and registers with Pulse. Returns nil (not an error)
-// if Pulse is not configured.
-func New(cfg config.PulseConfig, serverHost string, serverPort int, logger *slog.Logger) (*Integration, error) {
+// New creates and registers with Pulse using retry/backoff. Returns nil
+// (not an error) if Pulse is not configured (empty URL). Returns nil + error
+// if Pulse is configured but unreachable after retries — the caller should
+// continue in standalone mode.
+//
+// serviceAPIKey is this Haul instance's own API key. It's sent during
+// registration so Pilot/Prism can discover and authenticate with Haul
+// via Pulse's service registry.
+func New(cfg config.PulseConfig, serverHost string, serverPort int, serviceAPIKey string, logger *slog.Logger) (*Integration, error) {
 	if cfg.URL == "" {
 		logger.Info("pulse integration disabled (no URL configured)")
 		return nil, nil
@@ -49,14 +55,15 @@ func New(cfg config.PulseConfig, serverHost string, serverPort int, logger *slog
 		healthURL = apiURL + "/health"
 	}
 
-	client, err := sdk.New(sdk.Config{
-		PulseURL:    cfg.URL,
-		APIKey:      apiKey,
-		ServiceName: version.AppName,
-		ServiceType: "download-client",
-		APIURL:      apiURL,
-		HealthURL:   healthURL,
-		Version:     version.Version,
+	client, err := sdk.NewWithRetry(sdk.Config{
+		PulseURL:      cfg.URL,
+		APIKey:        apiKey,
+		ServiceName:   version.AppName,
+		ServiceType:   "download-client",
+		APIURL:        apiURL,
+		HealthURL:     healthURL,
+		Version:       version.Version,
+		ServiceAPIKey: serviceAPIKey,
 		Capabilities: []string{
 			"supports_torrent",
 			"supports_categories",
@@ -65,7 +72,10 @@ func New(cfg config.PulseConfig, serverHost string, serverPort int, logger *slog
 		Logger: logger,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("pulse registration failed: %w", err)
+		return nil, err
+	}
+	if client == nil {
+		return nil, nil
 	}
 
 	return &Integration{Client: client, logger: logger}, nil
