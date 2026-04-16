@@ -60,7 +60,7 @@ The web UI is at `http://localhost:8484`. Haul generates an API key on first run
 
 ### Docker Compose (with the rest of the stack)
 
-The full Beacon stack — Postgres, Pulse, Pilot, Prism, and Haul behind a VPN container — lives in [`beacon-stack/stack`](https://github.com/beacon-stack/stack). Point it at a media directory and everything's wired up.
+The full Beacon stack — Postgres, Pulse, Pilot, Prism, and Haul behind a VPN container — lives in [`beacon-stack/deploy`](https://github.com/beacon-stack/deploy). Point it at a media directory and everything's wired up.
 
 ### Build from source
 
