@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/beacon-stack/haul/internal/version"
+	"github.com/beacon-stack/pulse/pkg/secretfile"
 )
 
 const (
@@ -95,6 +96,7 @@ func Load(cfgFile string) (*Config, error) {
 	_ = v.BindEnv("auth.api_key", envPrefix+"_AUTH_API_KEY")
 	_ = v.BindEnv("database.path", envPrefix+"_DATABASE_PATH")
 	_ = v.BindEnv("database.dsn", envPrefix+"_DATABASE_DSN")
+	_ = v.BindEnv("database.password_file", envPrefix+"_DATABASE_PASSWORD_FILE")
 	_ = v.BindEnv("pulse.url", envPrefix+"_PULSE_URL")
 	_ = v.BindEnv("pulse.api_key", envPrefix+"_PULSE_API_KEY")
 	_ = v.BindEnv("torrent.download_dir", envPrefix+"_TORRENT_DOWNLOAD_DIR")
@@ -115,6 +117,14 @@ func Load(cfgFile string) (*Config, error) {
 		),
 	)); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
+	}
+
+	if cfg.Database.PasswordFile != "" {
+		merged, err := secretfile.OverrideDSNPassword(cfg.Database.DSN.Value(), cfg.Database.PasswordFile)
+		if err != nil {
+			return nil, fmt.Errorf("applying database password file: %w", err)
+		}
+		cfg.Database.DSN = Secret(merged)
 	}
 
 	// Default download directory.

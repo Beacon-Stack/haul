@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -106,6 +108,83 @@ func TestLoadFromEnv_Critical(t *testing.T) {
 				"This is the same Viper SetDefault gotcha as pause_on_complete.")
 		}
 	})
+
+	// Docker secrets path for the DB password. HAUL_DATABASE_PASSWORD_FILE
+	// must reach cfg.Database.PasswordFile so load.go can splice the file's
+	// contents into the DSN. A tempfile is used here because Load actually
+	// reads the file at load time.
+	t.Run("database.password_file", func(t *testing.T) {
+		pwFile := filepath.Join(t.TempDir(), "pw.txt")
+		if err := os.WriteFile(pwFile, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("HAUL_DATABASE_DSN", "postgres://user:plain@host:5432/db")
+		t.Setenv("HAUL_DATABASE_PASSWORD_FILE", pwFile)
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.Database.PasswordFile != pwFile {
+			t.Fatalf("HAUL_DATABASE_PASSWORD_FILE did not reach cfg.Database.PasswordFile — "+
+				"got %q. Check v.BindEnv(\"database.password_file\", ...) in load.go.",
+				cfg.Database.PasswordFile)
+		}
+	})
+}
+
+// TestLoad_PasswordFileSplicedIntoDSN exercises the end-to-end behavior:
+// when HAUL_DATABASE_PASSWORD_FILE points at a real file, Load must read
+// that file and splice its contents into the password component of
+// HAUL_DATABASE_DSN.
+func TestLoad_PasswordFileSplicedIntoDSN(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	dir := t.TempDir()
+	pwFile := filepath.Join(dir, "pw.txt")
+	if err := os.WriteFile(pwFile, []byte("secretpw\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HAUL_DATABASE_DSN", "postgres://user:plain@host:5432/db")
+	t.Setenv("HAUL_DATABASE_PASSWORD_FILE", pwFile)
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	want := "postgres://user:secretpw@host:5432/db"
+	if got := cfg.Database.DSN.Value(); got != want {
+		t.Fatalf("spliced DSN = %q; want %q", got, want)
+	}
+}
+
+func TestLoad_NoPasswordFile_LeavesDSNIntact(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	t.Setenv("HAUL_DATABASE_DSN", "postgres://user:plain@host:5432/db")
+	t.Setenv("HAUL_DATABASE_PASSWORD_FILE", "")
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	want := "postgres://user:plain@host:5432/db"
+	if got := cfg.Database.DSN.Value(); got != want {
+		t.Fatalf("DSN = %q; want %q", got, want)
+	}
+}
+
+func TestLoad_InvalidPasswordFilePath_Errors(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	t.Setenv("HAUL_DATABASE_DSN", "postgres://user:plain@host:5432/db")
+	t.Setenv("HAUL_DATABASE_PASSWORD_FILE", "/nonexistent/secret")
+
+	if _, err := Load(""); err == nil {
+		t.Fatal("expected error when password file path is invalid")
+	}
 }
 
 func TestTorrentConfigDefaults(t *testing.T) {
