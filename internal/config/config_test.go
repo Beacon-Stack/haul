@@ -130,6 +130,28 @@ func TestLoadFromEnv_Critical(t *testing.T) {
 				cfg.Database.PasswordFile)
 		}
 	})
+
+	// Docker secrets path for Pulse API key. HAUL_PULSE_API_KEY_FILE must
+	// reach cfg.Pulse.APIKeyFile so load.go can read the file and populate
+	// Pulse.APIKey. Without this binding, haul silently falls back to
+	// "pulse integration disabled — no API key configured" at runtime
+	// (the same failure mode that shipped in the initial deploy compose).
+	t.Run("pulse.api_key_file", func(t *testing.T) {
+		keyFile := filepath.Join(t.TempDir(), "pulse-api-key.txt")
+		if err := os.WriteFile(keyFile, []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("HAUL_PULSE_API_KEY_FILE", keyFile)
+		cfg, err := Load("")
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.Pulse.APIKeyFile != keyFile {
+			t.Fatalf("HAUL_PULSE_API_KEY_FILE did not reach cfg.Pulse.APIKeyFile — "+
+				"got %q. Check v.BindEnv(\"pulse.api_key_file\", ...) in load.go.",
+				cfg.Pulse.APIKeyFile)
+		}
+	})
 }
 
 // TestLoad_PasswordFileSplicedIntoDSN exercises the end-to-end behavior:
@@ -184,6 +206,37 @@ func TestLoad_InvalidPasswordFilePath_Errors(t *testing.T) {
 
 	if _, err := Load(""); err == nil {
 		t.Fatal("expected error when password file path is invalid")
+	}
+}
+
+func TestLoad_PulseAPIKeyFileReadIntoConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	keyFile := filepath.Join(t.TempDir(), "pulse-api-key.txt")
+	if err := os.WriteFile(keyFile, []byte("pulse-key-from-file\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("HAUL_PULSE_API_KEY", "inline-loses")
+	t.Setenv("HAUL_PULSE_API_KEY_FILE", keyFile)
+
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	if got := cfg.Pulse.APIKey.Value(); got != "pulse-key-from-file" {
+		t.Fatalf("Pulse.APIKey = %q; want pulse-key-from-file (file must override inline env)", got)
+	}
+}
+
+func TestLoad_InvalidPulseAPIKeyFilePath_Errors(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	t.Setenv("HAUL_PULSE_API_KEY_FILE", "/nonexistent/pulse-api-key")
+
+	if _, err := Load(""); err == nil {
+		t.Fatal("expected error when pulse api_key_file path is invalid")
 	}
 }
 

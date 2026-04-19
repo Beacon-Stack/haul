@@ -99,6 +99,7 @@ func Load(cfgFile string) (*Config, error) {
 	_ = v.BindEnv("database.password_file", envPrefix+"_DATABASE_PASSWORD_FILE")
 	_ = v.BindEnv("pulse.url", envPrefix+"_PULSE_URL")
 	_ = v.BindEnv("pulse.api_key", envPrefix+"_PULSE_API_KEY")
+	_ = v.BindEnv("pulse.api_key_file", envPrefix+"_PULSE_API_KEY_FILE")
 	_ = v.BindEnv("torrent.download_dir", envPrefix+"_TORRENT_DOWNLOAD_DIR")
 
 	if err := v.ReadInConfig(); err != nil {
@@ -125,6 +126,14 @@ func Load(cfgFile string) (*Config, error) {
 			return nil, fmt.Errorf("applying database password file: %w", err)
 		}
 		cfg.Database.DSN = Secret(merged)
+	}
+
+	if cfg.Pulse.APIKeyFile != "" {
+		contents, err := secretfile.Read(cfg.Pulse.APIKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("reading Pulse API key file: %w", err)
+		}
+		cfg.Pulse.APIKey = Secret(contents)
 	}
 
 	// Default download directory.
