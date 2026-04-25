@@ -13,7 +13,7 @@
 
 ---
 
-Haul is a BitTorrent client with a React web UI and a REST API. It's designed to drop into a Sonarr/Radarr-style pipeline — specifically [Pilot](https://github.com/beacon-stack/pilot) and [Prism](https://github.com/beacon-stack/prism) — but it runs fine on its own as a standalone client. It's built on [anacrolix/torrent](https://github.com/anacrolix/torrent), runs as a single Go binary, stores state in Postgres, and is configured from the UI or through environment variables.
+Haul is a BitTorrent client with a React web UI and a REST API. Run it on its own as a modern qBittorrent / Transmission alternative, or alongside [Pulse](https://github.com/beacon-stack/pulse), [Pilot](https://github.com/beacon-stack/pilot), and [Prism](https://github.com/beacon-stack/prism) — the [Beacon Stack](https://beaconstack.io) — where it picks up rename-on-complete, stall blocklisting, and the rest of the integrated *arr pipeline. It's built on [anacrolix/torrent](https://github.com/anacrolix/torrent), runs as a single Go binary, stores state in Postgres, and is configured from the UI or through environment variables.
 
 ## Is this for you?
 
@@ -45,22 +45,19 @@ You'll probably like Haul if you:
 
 ## Getting started
 
-### Docker
+### Standalone
+
+A single-service compose that runs Haul with its own dedicated Postgres lives at [`docker/docker-compose.yml`](docker/docker-compose.yml). Edit the two `/path/to/...` lines and the placeholder password, then:
 
 ```bash
-docker run -d \
-  --name haul \
-  -p 8484:8484 \
-  -v /path/to/config:/config \
-  -v /path/to/downloads:/downloads \
-  ghcr.io/beacon-stack/haul:latest
+docker compose -f docker/docker-compose.yml up -d
 ```
 
 The web UI is at `http://localhost:8484`. Haul generates an API key on first run; find it in Settings → System.
 
-### Docker Compose (with the rest of the stack)
+### As part of the Beacon Stack
 
-The full Beacon stack — Postgres, Pulse, Pilot, Prism, and Haul behind a VPN container — lives in [`beacon-stack/deploy`](https://github.com/beacon-stack/deploy). Point it at a media directory and everything's wired up.
+For the full setup — Pulse, Pilot, Prism, FlareSolverr, and Haul behind a VPN container — see [`beacon-stack/deploy`](https://github.com/beacon-stack/deploy). Standalone Haul works on its own; run it with the stack and rename-on-complete, stall blocklisting, and centralized indexer management light up.
 
 ### Build from source
 

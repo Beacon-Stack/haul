@@ -50,6 +50,21 @@ RUN apk add --no-cache ca-certificates tzdata && \
 
 COPY --from=builder /haul /usr/local/bin/haul
 
+# Beacon-stack-shaped defaults — the published image expects to land in a
+# compose with services named `postgres` and (optionally) `pulse`. For
+# standalone use, override these via the container's `environment:` block;
+# env always beats Dockerfile ENV. See docker/docker-compose.yml for the
+# standalone recipe.
+ENV HAUL_DATABASE_DRIVER=postgres \
+    HAUL_DATABASE_DSN="postgres://haul@postgres:5432/haul_db?sslmode=disable" \
+    HAUL_DATABASE_PASSWORD_FILE=/run/secrets/haul.txt \
+    HAUL_PULSE_URL=http://pulse:9696 \
+    HAUL_PULSE_API_KEY_FILE=/run/secrets/pulse-api-key.txt \
+    HAUL_TORRENT_LISTEN_PORT=6881 \
+    HAUL_TORRENT_DOWNLOAD_DIR=/downloads \
+    HAUL_LOG_LEVEL=info \
+    TZ=UTC
+
 # /config holds the local database and settings; /downloads holds torrent data.
 VOLUME ["/config", "/downloads"]
 

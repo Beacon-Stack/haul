@@ -1,0 +1,63 @@
+# ============================================================================
+# Haul — standalone deployment
+#
+# Runs Haul on its own with a dedicated Postgres. No Pulse, no Pilot/Prism.
+# Use this if you just want a torrent client with a modern web UI.
+#
+# For the full Beacon Stack (Haul + Pulse + Pilot + Prism + VPN), see
+# https://github.com/beacon-stack/deploy
+#
+# Quick start:
+#   1. Edit the /path/to/... lines and the password below.
+#   2. docker compose up -d
+#   3. Visit http://localhost:8484. Find your API key in Settings → System.
+# ============================================================================
+
+services:
+
+  haul-postgres:
+    image: postgres:17-alpine
+    container_name: haul-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: haul
+      POSTGRES_PASSWORD: change-me-please
+      POSTGRES_DB: haul_db
+    volumes:
+      - haul-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U haul"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  haul:
+    image: ghcr.io/beacon-stack/haul:latest
+    container_name: haul
+    restart: unless-stopped
+    depends_on:
+      haul-postgres:
+        condition: service_healthy
+    environment:
+      # Override the beacon-stack defaults baked into the image.
+      HAUL_DATABASE_DSN: "postgres://haul:change-me-please@haul-postgres:5432/haul_db?sslmode=disable"
+      HAUL_DATABASE_PASSWORD_FILE: ""
+      HAUL_PULSE_URL: ""
+      HAUL_PULSE_API_KEY_FILE: ""
+    volumes:
+      - /path/to/config:/config
+      - /path/to/downloads:/downloads
+    ports:
+      - "8484:8484"
+      - "6881:6881/tcp"
+      - "6881:6881/udp"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8484/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  haul-pgdata:
