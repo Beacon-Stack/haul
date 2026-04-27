@@ -59,6 +59,10 @@ type trackersOutput struct {
 	}
 }
 
+type swarmOutput struct {
+	Body *torrent.SwarmInfo
+}
+
 type emptyOutput struct {
 	Body struct{}
 }
@@ -209,5 +213,22 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 		out := &trackersOutput{}
 		out.Body.Trackers = trackers
 		return out, nil
+	})
+
+	// Swarm gauges — diagnoses "tracker says N seeders but we connected
+	// to far fewer" by exposing TotalPeers / PendingPeers / HalfOpenPeers
+	// alongside ActivePeers.
+	huma.Register(api, huma.Operation{
+		OperationID: "get-torrent-swarm",
+		Method:      http.MethodGet,
+		Path:        "/api/v1/torrents/{hash}/swarm",
+		Summary:     "Swarm-level peer gauges (known / pending / dialing / connected)",
+		Tags:        []string{"Torrents"},
+	}, func(_ context.Context, input *getTorrentInput) (*swarmOutput, error) {
+		swarm, err := session.Swarm(input.Hash)
+		if err != nil {
+			return nil, huma.Error404NotFound(err.Error())
+		}
+		return &swarmOutput{Body: swarm}, nil
 	})
 }

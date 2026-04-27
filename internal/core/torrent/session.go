@@ -142,6 +142,31 @@ type TrackerInfo struct {
 	URL  string `json:"url"`
 }
 
+// SwarmInfo surfaces anacrolix's TorrentGauges so callers can tell the
+// difference between "the swarm has 50 seeders but we only connected to 8"
+// (peer-discovery / dial-success problem) and "the swarm only has 8
+// seeders" (small swarm). The Info struct's `seeds`/`peers` fields are
+// only the connected slice; without these gauges, every download looks
+// like the swarm is small.
+type SwarmInfo struct {
+	// TotalPeers — every peer anacrolix has heard about across all sources
+	// (tracker announces, DHT, PEX). Includes peers we never actually
+	// dialed.
+	TotalPeers int `json:"total_peers"`
+	// PendingPeers — known but not yet dialed. If this stays large while
+	// ActivePeers stays tiny, anacrolix is rate-limiting outbound dials.
+	PendingPeers int `json:"pending_peers"`
+	// HalfOpenPeers — TCP/uTP handshake in flight. If this is the cap
+	// (TotalHalfOpenConns / 2 of MaxConnections), we're limited by the
+	// dial concurrency setting.
+	HalfOpenPeers int `json:"half_open_peers"`
+	// ActivePeers — fully connected, exchanging messages. Equal to
+	// len(PeerConns()) for v1.61.
+	ActivePeers int `json:"active_peers"`
+	// ConnectedSeeders — subset of ActivePeers with the full file.
+	ConnectedSeeders int `json:"connected_seeders"`
+}
+
 // AddRequest is the input for adding a new torrent.
 type AddRequest struct {
 	// URI is a magnet link, HTTP URL to a .torrent file, or empty if File is set.
@@ -325,6 +350,14 @@ func NewSession(cfg config.TorrentConfig, db *sql.DB, bus *events.Bus, logger *s
 	ltCfg.DefaultStorage = storage.NewFileWithCompletion(cfg.DownloadDir, pieceCompletion)
 	ltCfg.HTTPUserAgent = version.AppName + "/" + version.Version
 	ltCfg.NoDefaultPortForwarding = true // UPnP doesn't work through VPN tunnels
+
+	// Wire anacrolix's logger to ours. Without this, anacrolix's rich
+	// announce diagnostics ("announced", "announce err", "peers added by
+	// source X", per-tracker NumPeers) silently disappear into anacrolix's
+	// default discard logger. With it, we get visibility into "tracker
+	// returned 85 peers but we only ingested 3" mismatches at the source.
+	// Using a child logger so anacrolix lines are tagged "anacrolix=true".
+	ltCfg.Slogger = logger.With("subsystem", "anacrolix")
 
 	// Detect our public IP for DHT and self-connection filtering.
 	// Behind a VPN, the container's local IP differs from the tunnel's external IP.
@@ -663,6 +696,29 @@ func (s *Session) Trackers(hash string) ([]TrackerInfo, error) {
 		result = append(result, TrackerInfo{Tier: 0, URL: mi.Announce})
 	}
 	return result, nil
+}
+
+// Swarm returns anacrolix's swarm-level gauges: how many peers it knows
+// about vs how many it has fully connected. Used to diagnose
+// "swarm reports N seeders but we only connected to a few" cases — the
+// gap usually lives between PendingPeers (discovered, not dialed) and
+// HalfOpenPeers (dial in flight). Returns ("torrent not found") for an
+// unknown hash.
+func (s *Session) Swarm(hash string) (*SwarmInfo, error) {
+	s.mu.RLock()
+	mt, ok := s.torrents[hash]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("torrent not found: %s", hash)
+	}
+	g := mt.t.Stats().TorrentGauges
+	return &SwarmInfo{
+		TotalPeers:       g.TotalPeers,
+		PendingPeers:     g.PendingPeers,
+		HalfOpenPeers:    g.HalfOpenPeers,
+		ActivePeers:      g.ActivePeers,
+		ConnectedSeeders: g.ConnectedSeeders,
+	}, nil
 }
 
 // classifyPieceState flattens anacrolix's PieceState (which has overlapping
