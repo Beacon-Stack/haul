@@ -723,6 +723,13 @@ func (s *Session) List() []Info {
 }
 
 // Remove removes a torrent. If deleteFiles is true, downloaded data is deleted.
+//
+// DB cleanup runs in a defer so it survives a panic from anacrolix/torrent's
+// Drop() — without that, a library-internal crash mid-Drop would leave an
+// orphan torrents row that restoreFromDB would resurrect on next startup,
+// re-triggering the same panic. Real bug observed in the field with John
+// Wick (info hash ec5086c1c…): library panic during tracker announce
+// dispatcher → DB DELETE never ran → permanent crashloop on restart.
 func (s *Session) Remove(ctx context.Context, hash string, deleteFiles bool) error {
 	s.mu.Lock()
 	mt, ok := s.torrents[hash]
@@ -732,6 +739,9 @@ func (s *Session) Remove(ctx context.Context, hash string, deleteFiles bool) err
 	}
 	delete(s.torrents, hash)
 	s.mu.Unlock()
+
+	// DB cleanup must run regardless of what Drop() does. Defer first.
+	defer s.deleteTorrent(hash)
 
 	mt.t.Drop()
 
@@ -743,9 +753,6 @@ func (s *Session) Remove(ctx context.Context, hash string, deleteFiles bool) err
 		}
 		_ = os.RemoveAll(contentPath)
 	}
-
-	// Remove from database.
-	s.deleteTorrent(hash)
 
 	s.bus.Publish(ctx, events.Event{
 		Type:     events.TypeTorrentRemoved,
