@@ -5,50 +5,12 @@ import (
 	"time"
 )
 
-func TestTorrentInfoNotReady(t *testing.T) {
-	// A torrent that hasn't received metadata should return safe minimal info
-	// without panicking.
-	mt := &managedTorrent{
-		paused:   false,
-		category: "test-cat",
-		tags:     []string{"tag1", "tag2"},
-		addedAt:  time.Now(),
-		savePath: "/downloads",
-		ready:    false,
-	}
-
-	// We can't call torrentInfo without a real torrent handle,
-	// but we can verify the ready flag logic.
-	if mt.ready {
-		t.Error("expected ready=false for new managedTorrent")
-	}
-
-	// After metadata arrives, ready should be set.
-	mt.ready = true
-	if !mt.ready {
-		t.Error("expected ready=true after setting")
-	}
-}
-
-func TestManagedTorrentDefaults(t *testing.T) {
-	mt := &managedTorrent{
-		savePath: "/downloads",
-		addedAt:  time.Now(),
-	}
-
-	if mt.ready {
-		t.Error("ready should default to false")
-	}
-	if mt.paused {
-		t.Error("paused should default to false")
-	}
-	if mt.category != "" {
-		t.Error("category should default to empty")
-	}
-	if mt.lastBytesRead != 0 {
-		t.Error("lastBytesRead should default to 0")
-	}
-}
+// Removed: TestTorrentInfoNotReady, TestManagedTorrentDefaults — both
+// asserted Go zero-values on a struct literal without invoking any SUT
+// code path. A mutation that broke `managedTorrent` initialization in
+// Session.Add (where the struct is actually constructed) would not be
+// caught. The dead-torrent regression suite covers what these were
+// pretending to.
 
 func TestStatusConstants(t *testing.T) {
 	statuses := []Status{
@@ -143,158 +105,15 @@ func TestStallLevelConstants(t *testing.T) {
 	}
 }
 
-func TestTransferStatsZeroValue(t *testing.T) {
-	var stats TransferStats
-	if stats.TotalTorrents != 0 {
-		t.Error("zero value TotalTorrents should be 0")
-	}
-	if stats.ActiveDownloads != 0 {
-		t.Error("zero value ActiveDownloads should be 0")
-	}
-	if stats.DownloadSpeed != 0 {
-		t.Error("zero value DownloadSpeed should be 0")
-	}
-}
+// Removed: TestTransferStatsZeroValue, TestAddRequestValidation,
+// TestFileInfoPriority, TestHealthReportFields — all asserted Go
+// runtime semantics (zero values, struct round-trips) or
+// re-implemented validation logic in the test body and never invoked
+// the SUT (Session.Add / Session.SetFilePriority / Session.GetHealth).
+// Coverage holes that result are tracked separately under P1.
 
-func TestAddRequestValidation(t *testing.T) {
-	tests := []struct {
-		name    string
-		req     AddRequest
-		wantErr bool
-	}{
-		{
-			name:    "empty request",
-			req:     AddRequest{},
-			wantErr: true,
-		},
-		{
-			name:    "magnet URI",
-			req:     AddRequest{URI: "magnet:?xt=urn:btih:abc123"},
-			wantErr: false,
-		},
-		{
-			name:    "HTTP URL",
-			req:     AddRequest{URI: "http://example.com/file.torrent"},
-			wantErr: false,
-		},
-		{
-			name:    "base64 torrent data",
-			req:     AddRequest{URI: "data:application/x-bittorrent;base64,dGVzdA=="},
-			wantErr: false,
-		},
-		{
-			name:    "raw file bytes",
-			req:     AddRequest{File: []byte("test")},
-			wantErr: false, // will fail on parse but not on validation
-		},
-		{
-			name:    "unsupported scheme",
-			req:     AddRequest{URI: "ftp://example.com/file"},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			hasURI := tt.req.URI != ""
-			hasFile := len(tt.req.File) > 0
-
-			if !hasURI && !hasFile {
-				if !tt.wantErr {
-					t.Error("expected error for empty request")
-				}
-				return
-			}
-
-			if hasURI {
-				switch {
-				case len(tt.req.URI) >= 7 && tt.req.URI[:7] == "magnet:":
-					// valid
-				case len(tt.req.URI) >= 5 && tt.req.URI[:5] == "data:":
-					// valid
-				case len(tt.req.URI) >= 7 && (tt.req.URI[:7] == "http://" || tt.req.URI[:8] == "https://"):
-					// valid
-				default:
-					if !tt.wantErr {
-						t.Errorf("expected unsupported scheme error for %s", tt.req.URI)
-					}
-				}
-			}
-		})
-	}
-}
-
-func TestFileInfoPriority(t *testing.T) {
-	tests := []struct {
-		priority string
-		valid    bool
-	}{
-		{"skip", true},
-		{"normal", true},
-		{"high", true},
-		{"invalid", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.priority, func(t *testing.T) {
-			valid := tt.priority == "skip" || tt.priority == "normal" || tt.priority == "high"
-			if valid != tt.valid {
-				t.Errorf("priority %q: got valid=%v, want %v", tt.priority, valid, tt.valid)
-			}
-		})
-	}
-}
-
-func TestHealthReportFields(t *testing.T) {
-	report := &HealthReport{
-		ActiveDownloads: 3,
-		ActiveUploads:   5,
-		TotalTorrents:   8,
-		DownloadSpeed:   1048576,
-		UploadSpeed:     524288,
-		DiskFreeBytes:   1000000000,
-		DiskTotalBytes:  2000000000,
-		StalledCount:    1,
-		EngineStatus:    "healthy",
-		PeersConnected:  42,
-		VPNActive:       true,
-		VPNInterface:    "wg0",
-		ExternalIP:      "1.2.3.4",
-	}
-
-	if report.ActiveDownloads+report.ActiveUploads != int64(report.TotalTorrents) {
-		t.Error("active downloads + uploads should equal total")
-	}
-	if report.DiskFreeBytes > report.DiskTotalBytes {
-		t.Error("free disk should not exceed total")
-	}
-	if report.EngineStatus != "healthy" {
-		t.Error("expected healthy status")
-	}
-	if !report.VPNActive {
-		t.Error("VPN should be active")
-	}
-}
-
-func TestRequesterMetadata(t *testing.T) {
-	meta := RequesterMetadata{
-		Requester:   "prism",
-		MediaType:   "movie",
-		Title:       "Fight Club",
-		TMDBID:      550,
-		Quality:     "2160p Remux",
-		RequestedBy: "david",
-		RequestedAt: "2026-04-11T10:00:00Z",
-	}
-
-	if meta.Requester != "prism" {
-		t.Error("wrong requester")
-	}
-	if meta.TMDBID != 550 {
-		t.Error("wrong TMDB ID")
-	}
-}
+// Removed: TestRequesterMetadata — assigned struct fields, then
+// asserted the same values back. Pure Go round-trip, no SUT involved.
 
 func timePtr(t time.Time) *time.Time {
 	return &t
