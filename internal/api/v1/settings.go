@@ -26,6 +26,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -64,6 +65,11 @@ func applyRuntimeSettings(session *torrent.Session, updates map[string]string) [
 		case "pause_on_complete":
 			session.SetPauseOnComplete(v == "true" || v == "1")
 			applied = append(applied, k)
+		case "max_active_downloads":
+			if n, err := strconv.Atoi(v); err == nil {
+				session.SetMaxActiveDownloads(n)
+				applied = append(applied, k)
+			}
 		}
 	}
 	return applied

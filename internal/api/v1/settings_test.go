@@ -116,6 +116,57 @@ func TestApplyRuntimeSettings_UnknownKeyIgnored(t *testing.T) {
 	}
 }
 
+// TestApplyRuntimeSettings_MaxActiveDownloads pins the runtime dispatch
+// for the queue cap. Without this, the user can drag the slider in
+// settings, see the value persist in the DB, but the queue gate keeps
+// using the boot-time value — the same phantom-write class of bug
+// pause_on_complete previously had.
+func TestApplyRuntimeSettings_MaxActiveDownloads(t *testing.T) {
+	session := buildMinimalSession(t)
+
+	if got := session.MaxActiveDownloads(); got != 0 {
+		t.Fatalf("expected default 0 (unlimited), got %d", got)
+	}
+
+	applied := applyRuntimeSettings(session, map[string]string{
+		"max_active_downloads": "3",
+	})
+	if len(applied) != 1 || applied[0] != "max_active_downloads" {
+		t.Errorf("expected max_active_downloads applied, got %v", applied)
+	}
+	if got := session.MaxActiveDownloads(); got != 3 {
+		t.Fatalf("expected MaxActiveDownloads=3 after apply, got %d", got)
+	}
+
+	// Reset to unlimited.
+	applyRuntimeSettings(session, map[string]string{"max_active_downloads": "0"})
+	if got := session.MaxActiveDownloads(); got != 0 {
+		t.Fatalf("expected MaxActiveDownloads=0 after reset, got %d", got)
+	}
+}
+
+// TestApplyRuntimeSettings_MaxActiveDownloadsRejectsGarbage covers the
+// strconv.Atoi failure path. A malformed value must NOT crash the
+// dispatch and must NOT mutate the runtime value — easy regression
+// path if someone accidentally swaps to ParseInt with a different
+// error contract.
+func TestApplyRuntimeSettings_MaxActiveDownloadsRejectsGarbage(t *testing.T) {
+	session := buildMinimalSession(t)
+	session.SetMaxActiveDownloads(5)
+
+	applied := applyRuntimeSettings(session, map[string]string{
+		"max_active_downloads": "not-a-number",
+	})
+	for _, k := range applied {
+		if k == "max_active_downloads" {
+			t.Errorf("garbage value should not appear in applied list, got %v", applied)
+		}
+	}
+	if got := session.MaxActiveDownloads(); got != 5 {
+		t.Errorf("garbage value mutated MaxActiveDownloads to %d; want 5 unchanged", got)
+	}
+}
+
 // TestApplyRuntimeSettings_NilSession is the graceful-degradation case:
 // if for some reason the session is nil (e.g. settings endpoint wired up
 // before Session construction finishes), the handler must not panic.

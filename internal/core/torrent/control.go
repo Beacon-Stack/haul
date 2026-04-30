@@ -125,6 +125,10 @@ func (s *Session) SetSeedLimits(hash string, ratioLimit float64, timeLimitSecs i
 }
 
 // SetPriority sets the queue priority (lower = higher priority).
+//
+// After updating the DB, the queue gate re-runs so a priority change
+// takes effect immediately: if the user dragged a queued torrent above
+// the cap, it gets resumed and the displaced torrent is queue-paused.
 func (s *Session) SetPriority(hash string, priority int) error {
 	s.mu.RLock()
 	_, ok := s.torrents[hash]
@@ -133,8 +137,12 @@ func (s *Session) SetPriority(hash string, priority int) error {
 		return fmt.Errorf("torrent not found: %s", hash)
 	}
 
-	_, err := s.db.Exec(`UPDATE torrents SET priority = $1 WHERE info_hash = $2`, priority, hash)
-	return err
+	if _, err := s.db.Exec(`UPDATE torrents SET priority = $1 WHERE info_hash = $2`, priority, hash); err != nil {
+		return err
+	}
+
+	s.enforceMaxActiveDownloads(context.Background())
+	return nil
 }
 
 // SetSequential toggles sequential download mode.

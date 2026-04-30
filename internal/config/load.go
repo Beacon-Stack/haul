@@ -67,6 +67,10 @@ func Load(cfgFile string) (*Config, error) {
 	// boolean that ships via env var must be added here.
 	v.SetDefault("torrent.pause_on_complete", false)
 	v.SetDefault("torrent.rename_on_complete", false)
+	// 0 means "unlimited". Registering as a default ensures
+	// HAUL_TORRENT_MAX_ACTIVE_DOWNLOADS is picked up by Viper's
+	// AutomaticEnv (same gotcha as pause_on_complete).
+	v.SetDefault("torrent.max_active_downloads", 0)
 	// DataDir must be on a persistent volume — see TorrentConfig.DataDir
 	// comment for why. `/config` is the Docker volume mount path.
 	v.SetDefault("torrent.data_dir", "/config")

@@ -22,6 +22,7 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -212,8 +213,9 @@ type Session struct {
 	// cfg.* at call time and are updated by the settings HTTP handler when
 	// the user flips a toggle in the UI. Without this layer, UI toggles
 	// are phantom writes that only touch the DB and never affect behavior.
-	runtimeMu       sync.RWMutex
-	pauseOnComplete bool
+	runtimeMu          sync.RWMutex
+	pauseOnComplete    bool
+	maxActiveDownloads int
 
 	mu             sync.RWMutex
 	torrents       map[string]*managedTorrent
@@ -222,9 +224,15 @@ type Session struct {
 
 // managedTorrent pairs the library torrent handle with our metadata.
 type managedTorrent struct {
-	t              *lt.Torrent
-	paused         bool
-	category       string
+	t      *lt.Torrent
+	paused bool
+	// queuePaused is true when the torrent was paused by the
+	// max-active-downloads gate, NOT by an explicit user action. The
+	// queue gate may unpause it later when a slot frees; user-paused
+	// torrents (queuePaused=false, paused=true) stay paused forever
+	// until the user explicitly resumes them.
+	queuePaused bool
+	category    string
 	tags           []string
 	addedAt        time.Time
 	savePath       string
@@ -421,15 +429,16 @@ func NewSession(cfg config.TorrentConfig, db *sql.DB, bus *events.Bus, logger *s
 	}
 
 	s := &Session{
-		client:          client,
-		db:              db,
-		bus:             bus,
-		logger:          logger,
-		cfg:             cfg,
-		torrents:        make(map[string]*managedTorrent),
-		startedAt:       time.Now(),
-		pauseOnComplete: cfg.PauseOnComplete,
-		pieceCompletion: pieceCompletion,
+		client:             client,
+		db:                 db,
+		bus:                bus,
+		logger:             logger,
+		cfg:                cfg,
+		torrents:           make(map[string]*managedTorrent),
+		startedAt:          time.Now(),
+		pauseOnComplete:    cfg.PauseOnComplete,
+		maxActiveDownloads: cfg.MaxActiveDownloads,
+		pieceCompletion:    pieceCompletion,
 	}
 
 	// Runtime settings overlay: the `settings` DB table is the persistent
@@ -447,6 +456,13 @@ func NewSession(cfg config.TorrentConfig, db *sql.DB, bus *events.Bus, logger *s
 		if err == nil {
 			s.pauseOnComplete = v == "true" || v == "1"
 			logger.Info("pause_on_complete loaded from settings table", "value", s.pauseOnComplete)
+		}
+		var maxStr string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key = 'max_active_downloads'`).Scan(&maxStr); err == nil {
+			if n, err := strconv.Atoi(maxStr); err == nil {
+				s.maxActiveDownloads = n
+				logger.Info("max_active_downloads loaded from settings table", "value", n)
+			}
 		}
 	}
 
@@ -815,10 +831,14 @@ func (s *Session) Remove(ctx context.Context, hash string, deleteFiles bool) err
 		InfoHash: hash,
 	})
 
+	// Removal frees a download slot; promote the next queued torrent.
+	s.enforceMaxActiveDownloads(ctx)
 	return nil
 }
 
-// Pause pauses a torrent.
+// Pause pauses a torrent. This is the user-initiated pause path: it
+// clears queuePaused so the queue gate will treat this torrent as
+// sticky-paused and never auto-resume it.
 func (s *Session) Pause(hash string) error {
 	s.mu.Lock()
 	mt, ok := s.torrents[hash]
@@ -827,14 +847,27 @@ func (s *Session) Pause(hash string) error {
 		return fmt.Errorf("torrent not found: %s", hash)
 	}
 	mt.paused = true
+	mt.queuePaused = false
 	s.mu.Unlock()
 
 	// anacrolix doesn't have a native pause — we cancel all pieces.
-	mt.t.CancelPieces(0, mt.t.NumPieces())
+	// nil guard keeps unit tests that construct synthetic managedTorrents
+	// without a real handle exercising the state-flip + gate-trigger path.
+	if mt.t != nil {
+		mt.t.CancelPieces(0, mt.t.NumPieces())
+	}
+
+	// Pausing frees a download slot — let the queue gate promote a
+	// queued torrent into the gap.
+	s.enforceMaxActiveDownloads(context.Background())
 	return nil
 }
 
-// Resume resumes a paused torrent.
+// Resume resumes a paused torrent. This is the user-initiated resume
+// path: it clears queuePaused so subsequent state changes are clean.
+// The queue gate runs immediately after; if Resume puts the active set
+// over the cap, the lowest-priority active torrent (which may be the
+// one just resumed) gets queue-paused.
 func (s *Session) Resume(hash string) error {
 	s.mu.Lock()
 	mt, ok := s.torrents[hash]
@@ -843,9 +876,14 @@ func (s *Session) Resume(hash string) error {
 		return fmt.Errorf("torrent not found: %s", hash)
 	}
 	mt.paused = false
+	mt.queuePaused = false
 	s.mu.Unlock()
 
-	mt.t.DownloadAll()
+	if mt.t != nil {
+		mt.t.DownloadAll()
+	}
+
+	s.enforceMaxActiveDownloads(context.Background())
 	return nil
 }
 
@@ -885,6 +923,179 @@ func (s *Session) SetPauseOnComplete(v bool) {
 			"from", s.pauseOnComplete, "to", v)
 	}
 	s.pauseOnComplete = v
+}
+
+// MaxActiveDownloads returns the runtime-effective cap on concurrently
+// downloading torrents. Zero or negative means unlimited.
+func (s *Session) MaxActiveDownloads() int {
+	s.runtimeMu.RLock()
+	defer s.runtimeMu.RUnlock()
+	return s.maxActiveDownloads
+}
+
+// SetMaxActiveDownloads updates the runtime cap on concurrently
+// downloading torrents and immediately re-runs the queue gate so the
+// new value takes effect now (not just on next add/complete). Called by
+// the settings HTTP handler.
+func (s *Session) SetMaxActiveDownloads(n int) {
+	s.runtimeMu.Lock()
+	if s.maxActiveDownloads != n {
+		s.logger.Info("max_active_downloads changed via settings API",
+			"from", s.maxActiveDownloads, "to", n)
+	}
+	s.maxActiveDownloads = n
+	s.runtimeMu.Unlock()
+
+	s.enforceMaxActiveDownloads(context.Background())
+}
+
+// queueCandidate is one entry in the queue-gate decision input.
+// Already filtered: user-paused, not-ready, and seeding torrents are
+// excluded by the caller.
+type queueCandidate struct {
+	hash   string
+	paused bool
+	prio   int
+}
+
+// queueGateDecision is the pure math behind enforceMaxActiveDownloads.
+// Input must be sorted ASC by `prio` (highest priority first); the top
+// `max` entries are designated active, the rest queued. Returns hashes
+// that need to be resumed (paused → active) and hashes that need to be
+// queue-paused (active → paused).
+//
+// max <= 0 means "unlimited" — all candidates are designated active and
+// any currently-paused ones get resumed.
+//
+// Pure function: no Session state, no anacrolix calls. Tested via
+// TestQueueGateDecision_*.
+func queueGateDecision(candidates []queueCandidate, max int) (resume, queue []string) {
+	for i, c := range candidates {
+		shouldRun := max <= 0 || i < max
+		if shouldRun && c.paused {
+			resume = append(resume, c.hash)
+		} else if !shouldRun && !c.paused {
+			queue = append(queue, c.hash)
+		}
+	}
+	return resume, queue
+}
+
+// enforceMaxActiveDownloads pauses/resumes torrents to keep the count of
+// actively-downloading torrents at or below MaxActiveDownloads.
+//
+// Torrents are ordered by the `priority` column ASC (lower value = higher
+// priority); the top N still-incomplete torrents stay running, the rest
+// are queue-paused with paused=queuePaused=true.
+//
+// Skipped entirely:
+//   - User-paused torrents (paused=true, queuePaused=false). Sticky:
+//     the user's explicit pause is preserved across gate runs.
+//   - Torrents whose metadata hasn't arrived yet (ready=false). They'll
+//     be reconsidered on a later run after waitAndStart marks them ready.
+//   - Seeders (BytesMissing == 0). They've finished downloading, don't
+//     compete for download slots.
+//
+// MaxActiveDownloads <= 0 disables the cap: all queue-paused torrents
+// are released and nothing new gets queue-paused.
+//
+// Caller must NOT hold s.mu — this method takes the lock internally and
+// also calls anacrolix's CancelPieces / DownloadAll which can be slow.
+func (s *Session) enforceMaxActiveDownloads(ctx context.Context) {
+	max := s.MaxActiveDownloads()
+
+	// Read priority order from DB so the gate's choice of "who runs"
+	// matches what the user sees in the UI list. List() also reads
+	// `priority ASC` — keep the two in sync.
+	priorityIdx := make(map[string]int)
+	if s.db != nil {
+		rows, err := s.db.Query(`SELECT info_hash, priority FROM torrents ORDER BY priority ASC`)
+		if err == nil {
+			i := 0
+			for rows.Next() {
+				var hash string
+				var prio int
+				if rows.Scan(&hash, &prio) == nil {
+					priorityIdx[hash] = i
+					i++
+				}
+			}
+			rows.Close()
+		}
+	}
+
+	type entry struct {
+		hash string
+		mt   *managedTorrent
+		prio int
+	}
+
+	s.mu.RLock()
+	entries := make([]entry, 0, len(s.torrents))
+	for hash, mt := range s.torrents {
+		if mt.paused && !mt.queuePaused {
+			continue // sticky user pause
+		}
+		if !mt.ready {
+			continue // metadata not loaded yet
+		}
+		if mt.t.BytesMissing() == 0 {
+			continue // seeder, doesn't use a download slot
+		}
+		p, ok := priorityIdx[hash]
+		if !ok {
+			p = len(priorityIdx) + 1 // unknown → push to end
+		}
+		entries = append(entries, entry{hash: hash, mt: mt, prio: p})
+	}
+	s.mu.RUnlock()
+
+	// Stable sort by DB priority (ASC).
+	for i := 1; i < len(entries); i++ {
+		for j := i; j > 0 && entries[j-1].prio > entries[j].prio; j-- {
+			entries[j-1], entries[j] = entries[j], entries[j-1]
+		}
+	}
+
+	cands := make([]queueCandidate, len(entries))
+	byHash := make(map[string]*entry, len(entries))
+	for i := range entries {
+		cands[i] = queueCandidate{hash: entries[i].hash, paused: entries[i].mt.paused, prio: entries[i].prio}
+		byHash[entries[i].hash] = &entries[i]
+	}
+
+	resume, queue := queueGateDecision(cands, max)
+
+	if len(resume) == 0 && len(queue) == 0 {
+		return
+	}
+
+	for _, hash := range resume {
+		e := byHash[hash]
+		s.mu.Lock()
+		e.mt.paused = false
+		e.mt.queuePaused = false
+		s.mu.Unlock()
+		e.mt.t.DownloadAll()
+		s.bus.Publish(ctx, events.Event{
+			Type:     events.TypeTorrentStateChanged,
+			InfoHash: hash,
+			Data:     map[string]any{"queue_action": "resumed"},
+		})
+	}
+	for _, hash := range queue {
+		e := byHash[hash]
+		s.mu.Lock()
+		e.mt.paused = true
+		e.mt.queuePaused = true
+		s.mu.Unlock()
+		e.mt.t.CancelPieces(0, e.mt.t.NumPieces())
+		s.bus.Publish(ctx, events.Event{
+			Type:     events.TypeTorrentStateChanged,
+			InfoHash: hash,
+			Data:     map[string]any{"queue_action": "queued"},
+		})
+	}
 }
 
 // addFromURL downloads a .torrent file from an HTTP/HTTPS URL and adds it.
@@ -1001,7 +1212,14 @@ func (s *Session) torrentInfo(hash string, mt *managedTorrent) (result *Info) {
 			status = StatusSeeding
 		}
 	} else if mt.paused {
-		status = StatusPaused
+		// Queue-paused gets its own status so the UI can render queued
+		// torrents distinctly from user-paused ones (the latter are
+		// sticky; the former auto-resume when a slot frees).
+		if mt.queuePaused {
+			status = StatusQueued
+		} else {
+			status = StatusPaused
+		}
 	}
 
 	var progress float64
@@ -1209,6 +1427,13 @@ func (s *Session) waitAndStart(mt *managedTorrent, hash string, paused, sequenti
 		mt.t.DownloadAll()
 	}
 
+	// Apply the max-active-downloads cap now that this torrent is ready
+	// (BytesMissing is meaningful once metadata has arrived). If we're
+	// over the cap, this run will queue-pause the lowest-priority active
+	// torrent — which may be the one we just started. The UI shows it
+	// as "Queued" until a slot frees.
+	s.enforceMaxActiveDownloads(context.Background())
+
 	// Update DB with name, size, and .torrent bytes now that we have metadata.
 	// Saving the torrent bytes enables fast-resume on restart without re-fetching
 	// metadata from peers.
@@ -1268,6 +1493,12 @@ func (s *Session) monitorCompletion(mt *managedTorrent, hash string) {
 				s.logger.Info("pause on complete enabled, pausing", "hash", hash)
 				_ = s.Pause(hash)
 			}
+
+			// Completion frees a download slot; promote the next
+			// queued torrent into the gap. (If PauseOnComplete fired
+			// above, Pause() already ran the gate — this second call
+			// is a cheap no-op since nothing else has changed.)
+			s.enforceMaxActiveDownloads(context.Background())
 			return
 		}
 
