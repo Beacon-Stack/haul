@@ -49,6 +49,58 @@ var firstPeerTimeout = 180 * time.Second
 // environments where 10 min isn't enough.
 var sessionStartupGrace = 10 * time.Minute
 
+// SetFirstPeerTimeoutForTesting lets cross-package tests (e.g. api/v1
+// stall handler tests) shrink the no-peers-ever stall threshold so a
+// fresh torrent crosses it in milliseconds. Returns the previous value
+// so the caller can restore it on cleanup. Production code must NOT
+// call this — it changes the stall-detection contract globally.
+func SetFirstPeerTimeoutForTesting(d time.Duration) time.Duration {
+	prev := firstPeerTimeout
+	firstPeerTimeout = d
+	return prev
+}
+
+// SetSessionStartupGraceForTesting lets cross-package tests bypass the
+// 10-minute warm-up suppression window so ListStalled actually surfaces
+// the seeded torrent. Returns the previous value so the caller can
+// restore it. Production code must NOT call this.
+func SetSessionStartupGraceForTesting(d time.Duration) time.Duration {
+	prev := sessionStartupGrace
+	sessionStartupGrace = d
+	return prev
+}
+
+// AddNoPeersTorrentForTesting registers a torrent in the session's
+// internal map with `addedAt = past`, no peers, no metadata — the exact
+// shape both GetStallInfo and ListStalled classify as no_peers_ever
+// once firstPeerTimeout elapses. The hash is derived from `seed` so
+// each test can predict the resulting info_hash.
+//
+// Cross-package callers (api/v1 stall handler tests) use this to seed
+// state that the production add-torrent path would otherwise require
+// real anacrolix peers to produce. The torrent is NOT registered with
+// the anacrolix client — the stall classifiers only read managedTorrent
+// fields, so the missing client-side handle is safe for the tested
+// no-peers-ever path. Returns the info-hash hex.
+//
+// Production code MUST NOT call this — it bypasses Add, the session DB,
+// and the lifecycle hooks.
+func (s *Session) AddNoPeersTorrentForTesting(seed string, addedAt time.Time) string {
+	var h [20]byte
+	for i := 0; i < len(seed) && i < 20; i++ {
+		h[i] = seed[i]
+	}
+	hashHex := fmt.Sprintf("%x", h)
+	s.mu.Lock()
+	s.torrents[hashHex] = &managedTorrent{
+		addedAt:  addedAt,
+		ready:    false,
+		savePath: s.cfg.DownloadDir,
+	}
+	s.mu.Unlock()
+	return hashHex
+}
+
 // StallInfo holds stall detection data for a torrent.
 type StallInfo struct {
 	Stalled      bool       `json:"stalled"`

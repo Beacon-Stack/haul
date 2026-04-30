@@ -16,6 +16,7 @@ import (
 	"database/sql"
 	"log/slog"
 	"os"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -479,4 +480,113 @@ func newTestSession(t *testing.T) *Session {
 	}
 	t.Cleanup(session.Close)
 	return session
+}
+
+// ── GetStallInfo direct unit tests ─────────────────────────────────────────
+//
+// These guard the per-torrent stall surface (`/api/v1/torrents/{hash}/stall`)
+// against drifting from the bulk surface (CheckStalls / ListStalled). All
+// three classifiers must agree — a previous incident left GetStallInfo
+// reporting "stalled" while ListStalled said "ok," and the fix lives in
+// stall.go's three near-duplicate decision blocks staying in sync.
+
+// Unknown hash must return an explanatory error so the HTTP handler
+// can map it to a 404 instead of a 500. The exact error text is part
+// of the contract the api/v1 handler relies on (line 113 in health.go
+// uses the message verbatim in huma.Error404NotFound).
+func TestGetStallInfo_UnknownHashReturnsError(t *testing.T) {
+	session := newTestSession(t)
+	_, err := session.GetStallInfo("0000000000000000000000000000000000000000")
+	if err == nil {
+		t.Fatal("expected error for unknown hash, got nil")
+	}
+	if !strings.Contains(err.Error(), "torrent not found") {
+		t.Errorf("expected error to mention 'torrent not found', got %q", err.Error())
+	}
+}
+
+// A torrent past firstPeerTimeout with `firstPeerAt == nil` must
+// classify as no_peers_ever — same answer the bulk endpoint gives.
+// Both the api/v1 handler and Pilot's stallwatcher rely on this
+// being the FIRST branch the classifier hits, before the
+// `mt.t.BytesMissing()` access (which would panic for pre-metadata).
+func TestGetStallInfo_NoPeersEverPath(t *testing.T) {
+	saved1 := firstPeerTimeout
+	firstPeerTimeout = 10 * time.Millisecond
+	t.Cleanup(func() { firstPeerTimeout = saved1 })
+
+	session := newTestSession(t)
+
+	var randomHash metainfo.Hash
+	copy(randomHash[:], []byte("getstall-no-peers-1"))
+	spec := &lt.TorrentSpec{
+		AddTorrentOpts: lt.AddTorrentOpts{InfoHash: randomHash},
+		DisplayName:    "getstall-no-peers",
+	}
+	if _, _, err := session.client.AddTorrentSpec(spec); err != nil {
+		t.Fatalf("adding test torrent: %v", err)
+	}
+	tHandle, _ := session.client.Torrent(randomHash)
+	session.mu.Lock()
+	session.torrents[randomHash.HexString()] = &managedTorrent{
+		t:       tHandle,
+		addedAt: time.Now().Add(-1 * time.Second), // already past timeout
+		ready:   false,
+	}
+	session.mu.Unlock()
+
+	info, err := session.GetStallInfo(randomHash.HexString())
+	if err != nil {
+		t.Fatalf("GetStallInfo: %v", err)
+	}
+	if !info.Stalled {
+		t.Errorf("Stalled = false, want true (no_peers_ever path)")
+	}
+	if info.Level != StallNoPeersEver {
+		t.Errorf("Level = %d, want %d (StallNoPeersEver)", info.Level, StallNoPeersEver)
+	}
+	if info.Reason != ReasonNoPeersEver {
+		t.Errorf("Reason = %q, want %q", info.Reason, ReasonNoPeersEver)
+	}
+	if info.InactiveSecs <= 0 {
+		t.Errorf("InactiveSecs = %d, want > 0", info.InactiveSecs)
+	}
+}
+
+// Inside the firstPeerTimeout window AND pre-metadata, GetStallInfo
+// must return Stalled=false — not a stall, just a brand-new torrent
+// still warming up. If this branch breaks, the UI badge falsely
+// reports "stalled" the moment a torrent is added.
+func TestGetStallInfo_PreMetadataWithinTimeoutNotStalled(t *testing.T) {
+	saved1 := firstPeerTimeout
+	firstPeerTimeout = 5 * time.Minute // big enough that addedAt=now is well within
+	t.Cleanup(func() { firstPeerTimeout = saved1 })
+
+	session := newTestSession(t)
+
+	var randomHash metainfo.Hash
+	copy(randomHash[:], []byte("getstall-warming-up0"))
+	spec := &lt.TorrentSpec{
+		AddTorrentOpts: lt.AddTorrentOpts{InfoHash: randomHash},
+		DisplayName:    "getstall-warming-up",
+	}
+	if _, _, err := session.client.AddTorrentSpec(spec); err != nil {
+		t.Fatalf("adding test torrent: %v", err)
+	}
+	tHandle, _ := session.client.Torrent(randomHash)
+	session.mu.Lock()
+	session.torrents[randomHash.HexString()] = &managedTorrent{
+		t:       tHandle,
+		addedAt: time.Now(), // just added
+		ready:   false,
+	}
+	session.mu.Unlock()
+
+	info, err := session.GetStallInfo(randomHash.HexString())
+	if err != nil {
+		t.Fatalf("GetStallInfo: %v", err)
+	}
+	if info.Stalled {
+		t.Errorf("Stalled = true, want false (still within firstPeerTimeout window)")
+	}
 }
