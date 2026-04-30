@@ -3,8 +3,9 @@ import { Link } from "react-router-dom";
 import { Plus, Pause, Play, Trash2, Search, Download, Upload, HardDrive, GripVertical, Shield, ShieldOff } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@beacon-shared/ConfirmDialog";
-import { useTorrents, useAddTorrent, useDeleteTorrent, usePauseTorrent, useResumeTorrent, useReorderTorrents, type TorrentInfo } from "@/api/torrents";
+import { useTorrents, useAddTorrent, useDeleteTorrent, usePauseTorrent, useResumeTorrent, useReorderTorrents, useSetTorrentPriority, type TorrentInfo } from "@/api/torrents";
 import { useHealth } from "@/api/health";
+import { useSettings } from "@/api/settings";
 import { torrentVisual, visualByKey, type TorrentVisualKey } from "@/lib/torrentStatus";
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
@@ -221,10 +222,13 @@ function TorrentCard({ t, draggable }: { t: TorrentInfo; draggable: boolean }) {
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: t.info_hash });
 
+  const isQueued = t.status === "queued";
   const style: React.CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition: transition || "transform 200ms ease",
-    opacity: isDragging ? 0.5 : 1,
+    // Dragging always wins; queued cards are visually demoted at 55% opacity
+    // so the user can immediately see the active/queued boundary.
+    opacity: isDragging ? 0.5 : isQueued ? 0.55 : 1,
     zIndex: isDragging ? 10 : 0,
     position: "relative" as const,
   };
@@ -372,6 +376,7 @@ const selectStyle: React.CSSProperties = {
 
 export default function TorrentList() {
   const { data: torrents, isLoading } = useTorrents();
+  const { data: settings } = useSettings();
   const [showAdd, setShowAdd] = useState(false);
   const [statusFilters, setStatusFilters] = useState<Set<StatusFilter>>(new Set(["active"]));
   const [categoryFilters, setCategoryFilters] = useState<Set<string>>(new Set());
@@ -448,6 +453,15 @@ export default function TorrentList() {
   }, [torrents, statusFilters, categoryFilters, tagFilters, sortField, search, localOrder]);
 
   const reorder = useReorderTorrents();
+  const setPriority = useSetTorrentPriority();
+
+  // maxActiveDownloads: 0 means unlimited (no divider).
+  const maxActiveDownloads = useMemo(() => {
+    const raw = settings?.["max_active_downloads"];
+    if (!raw) return 0;
+    const n = Number(raw);
+    return isNaN(n) ? 0 : n;
+  }, [settings]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -468,7 +482,11 @@ export default function TorrentList() {
     setLocalOrder(newOrder);
     setSortField("manual");
 
-    // Persist to backend. Keep local order — it stays until sort mode changes.
+    // Use the per-torrent priority endpoint so the backend can re-run the
+    // queue gate immediately (the old bulk /reorder doesn't trigger it).
+    // Priority is 1-indexed positional rank in the new order.
+    setPriority.mutate({ hash: active.id as string, priority: newIndex + 1 });
+    // Also send the full order for consistency with the existing reorder path.
     reorder.mutate(newOrder);
   }
 
@@ -836,7 +854,47 @@ export default function TorrentList() {
         >
           <SortableContext items={filtered.map((t) => t.info_hash)} strategy={verticalListSortingStrategy}>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {filtered.map((t) => <TorrentCard key={t.info_hash} t={t} draggable={sortField === "manual"} />)}
+              {filtered.map((t, i) => {
+                // Cap-line divider: only show in manual sort mode when the
+                // setting is non-zero. We insert it between the last active
+                // slot and the first queued one — i.e. before index
+                // maxActiveDownloads when that position is within the list.
+                const showCapLine =
+                  sortField === "manual" &&
+                  maxActiveDownloads > 0 &&
+                  i === maxActiveDownloads &&
+                  i < filtered.length;
+
+                return (
+                  <div key={t.info_hash}>
+                    {showCapLine && (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          margin: "2px 0",
+                        }}
+                      >
+                        <div style={{ flex: 1, height: 1, background: "var(--color-status-queued)", opacity: 0.4 }} />
+                        <span style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                          color: "var(--color-status-queued)",
+                          opacity: 0.7,
+                          flexShrink: 0,
+                        }}>
+                          Queue limit — {maxActiveDownloads} active
+                        </span>
+                        <div style={{ flex: 1, height: 1, background: "var(--color-status-queued)", opacity: 0.4 }} />
+                      </div>
+                    )}
+                    <TorrentCard t={t} draggable={sortField === "manual"} />
+                  </div>
+                );
+              })}
             </div>
           </SortableContext>
         </DndContext>

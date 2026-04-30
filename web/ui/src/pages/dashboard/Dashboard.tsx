@@ -22,6 +22,7 @@ export default function Dashboard() {
   const { data: stats } = useStats();
 
   const downloading = torrents?.filter((t) => t.status === "downloading") ?? [];
+  const queued = torrents?.filter((t) => t.status === "queued") ?? [];
   const seeding = torrents?.filter((t) => t.status === "seeding" || t.status === "completed") ?? [];
   const paused = torrents?.filter((t) => t.status === "paused") ?? [];
 
@@ -94,49 +95,70 @@ export default function Dashboard() {
         ))}
       </div>
 
-      {/* Active downloads list */}
-      {downloading.length > 0 && (
+      {/* Active downloads list + queued */}
+      {(downloading.length > 0 || queued.length > 0) && (
         <div style={{ marginTop: 24 }}>
           <h2 style={{ fontSize: 13, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.04em", color: "var(--color-text-muted)", margin: "0 0 10px" }}>
             Active Downloads
           </h2>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {downloading.map((t) => (
-              <div
-                key={t.info_hash}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "10px 14px",
-                  background: "var(--color-bg-surface)",
-                  border: "1px solid var(--color-border-subtle)",
-                  borderRadius: 6,
-                }}
-              >
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {t.name}
+            {[...downloading, ...queued].map((t) => {
+              const isQueued = t.status === "queued";
+              return (
+                <div
+                  key={t.info_hash}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    padding: "10px 14px",
+                    background: "var(--color-bg-surface)",
+                    border: "1px solid var(--color-border-subtle)",
+                    borderRadius: 6,
+                    opacity: isQueued ? 0.55 : 1,
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                      <div style={{ fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, minWidth: 0 }}>
+                        {t.name}
+                      </div>
+                      {isQueued && (
+                        <span style={{
+                          fontSize: 10,
+                          padding: "1px 6px",
+                          borderRadius: 4,
+                          fontWeight: 600,
+                          flexShrink: 0,
+                          background: "color-mix(in srgb, var(--color-status-queued) 15%, transparent)",
+                          color: "var(--color-status-queued)",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.04em",
+                        }}>
+                          Queued
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 12, marginTop: 2 }}>
+                      <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{(t.progress * 100).toFixed(1)}%</span>
+                      {!isQueued && <span style={{ fontSize: 11, color: "var(--color-status-downloading)" }}>{formatSpeed(t.download_rate)}</span>}
+                      <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{t.seeds} seeds</span>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
-                    <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{(t.progress * 100).toFixed(1)}%</span>
-                    <span style={{ fontSize: 11, color: "var(--color-status-downloading)" }}>{formatSpeed(t.download_rate)}</span>
-                    <span style={{ fontSize: 11, color: "var(--color-text-muted)" }}>{t.seeds} seeds</span>
+                  {/* Progress bar */}
+                  <div style={{ width: 100, height: 4, borderRadius: 2, background: "var(--color-bg-subtle)", flexShrink: 0 }}>
+                    <div
+                      style={{
+                        width: `${Math.min(t.progress * 100, 100)}%`,
+                        height: "100%",
+                        borderRadius: 2,
+                        background: isQueued ? "var(--color-status-queued)" : "var(--color-status-downloading)",
+                      }}
+                    />
                   </div>
                 </div>
-                {/* Progress bar */}
-                <div style={{ width: 100, height: 4, borderRadius: 2, background: "var(--color-bg-subtle)", flexShrink: 0 }}>
-                  <div
-                    style={{
-                      width: `${Math.min(t.progress * 100, 100)}%`,
-                      height: "100%",
-                      borderRadius: 2,
-                      background: "var(--color-status-downloading)",
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

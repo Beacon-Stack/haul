@@ -183,3 +183,18 @@ export function useReorderTorrents() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents"] }),
   });
 }
+
+// useSetTorrentPriority sends the new rank for a single torrent.
+// The backend re-runs the queue gate after this call; the next poll
+// will reflect updated statuses for any torrents that crossed the cap.
+export function useSetTorrentPriority() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ hash, priority }: { hash: string; priority: number }) =>
+      apiFetch(`/torrents/${hash}/priority`, {
+        method: "PUT",
+        body: JSON.stringify({ priority }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents"] }),
+  });
+}
