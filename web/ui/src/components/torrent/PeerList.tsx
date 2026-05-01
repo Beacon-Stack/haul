@@ -113,9 +113,10 @@ export default function PeerList({ peers }: PeerListProps) {
         borderRadius: 6,
         maxHeight,
         overflowY: "auto",
+        overflowX: "auto",
       }}
     >
-      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+      <table style={{ width: "100%", minWidth: 800, borderCollapse: "collapse" }}>
         <thead>
           <tr>
             <th style={thStyle}>Address</th>
