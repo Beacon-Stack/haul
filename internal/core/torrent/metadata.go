@@ -6,6 +6,11 @@ import (
 )
 
 // RequesterMetadata holds structured context from the service that requested the download.
+//
+// The MovieID/SeriesID/EpisodeID fields carry the arr's own UUIDs so
+// Pilot/Prism can later look up "have I downloaded anything for
+// episode_id=X?" via Haul's history endpoints. They're opaque strings
+// to Haul — Haul never resolves them, just stores and returns them.
 type RequesterMetadata struct {
 	Requester     string `json:"requester,omitempty"`      // "prism", "pilot", "manual"
 	MediaType     string `json:"media_type,omitempty"`     // "movie", "tv", "unknown"
@@ -19,9 +24,20 @@ type RequesterMetadata struct {
 	QualityCodec  string `json:"quality_codec,omitempty"`  // "x265"
 	RequestedBy   string `json:"requested_by,omitempty"`   // user who requested
 	RequestedAt   string `json:"requested_at,omitempty"`   // ISO8601
+	// Arr-side identifiers — UUID-shaped strings the requester uses to
+	// reference its own DB rows. Empty when the caller didn't supply them.
+	MovieID   string `json:"movie_id,omitempty"`   // Prism movie UUID
+	SeriesID  string `json:"series_id,omitempty"`  // Pilot series UUID
+	EpisodeID string `json:"episode_id,omitempty"` // Pilot episode UUID
 }
 
 // SetMetadata attaches structured requester metadata to a torrent.
+//
+// Persists the full struct to the `metadata` JSON column AND
+// denormalizes the indexed fields (requester_*, requester_tmdb_id,
+// season, episode, movie_id, series_id, episode_id) into their own
+// columns so Pilot/Prism's history-lookup queries can hit indexes
+// instead of scanning JSON.
 func (s *Session) SetMetadata(hash string, meta RequesterMetadata) error {
 	s.mu.RLock()
 	_, ok := s.torrents[hash]
@@ -35,7 +51,26 @@ func (s *Session) SetMetadata(hash string, meta RequesterMetadata) error {
 		return fmt.Errorf("marshaling metadata: %w", err)
 	}
 
-	_, err = s.db.Exec(`UPDATE torrents SET metadata = $1 WHERE info_hash = $2`, string(data), hash)
+	_, err = s.db.Exec(`UPDATE torrents SET
+		metadata             = $1,
+		requester_service    = $2,
+		requester_movie_id   = $3,
+		requester_series_id  = $4,
+		requester_episode_id = $5,
+		requester_tmdb_id    = $6,
+		requester_season     = $7,
+		requester_episode    = $8
+	WHERE info_hash = $9`,
+		string(data),
+		meta.Requester,
+		meta.MovieID,
+		meta.SeriesID,
+		meta.EpisodeID,
+		meta.TMDBID,
+		meta.SeasonNumber,
+		meta.EpisodeNumber,
+		hash,
+	)
 	return err
 }
 

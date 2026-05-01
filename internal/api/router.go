@@ -57,6 +57,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 
 	v1.RegisterTorrentRoutes(humaAPI, cfg.Session)
 	v1.RegisterTorrentControlRoutes(humaAPI, cfg.Session)
+	v1.RegisterHistoryRoutes(humaAPI, cfg.Session)
 	v1.RegisterCategoryRoutes(humaAPI, cfg.Categories)
 	v1.RegisterTagRoutes(humaAPI, cfg.Tags)
 	v1.RegisterStatsRoutes(humaAPI, cfg.Session)
