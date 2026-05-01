@@ -1520,6 +1520,12 @@ func (s *Session) persistTorrent(hash string, mt *managedTorrent) {
 	if s.db == nil {
 		return
 	}
+	// removed_at is cleared on re-add so a previously-removed torrent
+	// can be re-downloaded fresh and history-lookup callers see it as
+	// active again. The other history fields (requester_*, completed_at)
+	// are NOT cleared here — completed_at is set later by
+	// monitorCompletion, and the requester_* fields come in via
+	// SetMetadata (separate write path).
 	_, err := s.db.Exec(`
 		INSERT INTO torrents (info_hash, name, save_path, category, added_at, sequential)
 		VALUES ($1, $2, $3, $4, $5, $6)
@@ -1528,7 +1534,8 @@ func (s *Session) persistTorrent(hash string, mt *managedTorrent) {
 			save_path = EXCLUDED.save_path,
 			category = EXCLUDED.category,
 			added_at = EXCLUDED.added_at,
-			sequential = EXCLUDED.sequential`,
+			sequential = EXCLUDED.sequential,
+			removed_at = NULL`,
 		hash, mt.t.Name(), mt.savePath, mt.category, mt.addedAt, false,
 	)
 	if err != nil {
@@ -1581,13 +1588,26 @@ func (s *Session) markCompleted(hash string, completedAt time.Time) {
 	}
 }
 
-// deleteTorrent removes a torrent from the database.
+// deleteTorrent marks a torrent as removed but keeps the row so
+// Pilot/Prism can still ask "did you ever download X?". A separate
+// nightly purge job hard-deletes records whose removed_at is older
+// than the configured retention window (default 365 days).
+//
+// torrent_tags is hard-deleted because tags are a per-torrent concept
+// and have no historical-lookup value once the torrent is gone.
+//
+// On hash collision (anacrolix returns the existing torrent for a
+// re-add of an already-known info_hash), this path runs after the
+// re-add but the row already exists with removed_at = NULL — that's
+// fine, the UPDATE is a no-op. New downloads of a previously-removed
+// hash should clear removed_at; that's handled in the persist path
+// (Add → persistTorrent's ON CONFLICT clause).
 func (s *Session) deleteTorrent(hash string) {
 	if s.db == nil {
 		return
 	}
 	_, _ = s.db.Exec(`DELETE FROM torrent_tags WHERE info_hash = $1`, hash)
-	_, _ = s.db.Exec(`DELETE FROM torrents WHERE info_hash = $1`, hash)
+	_, _ = s.db.Exec(`UPDATE torrents SET removed_at = NOW() WHERE info_hash = $1 AND removed_at IS NULL`, hash)
 }
 
 // restoreFromDB loads previously saved torrents from the database.
