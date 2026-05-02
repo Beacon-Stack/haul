@@ -485,6 +485,10 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 			resultErr = fmt.Errorf("internal error adding torrent: %v", r)
 		}
 	}()
+
+	source := classifyAddSource(req)
+	s.logger.Info("add torrent", "source", source, "uri_preview", uriPreview(req.URI), "file_bytes", len(req.File))
+
 	savePath := req.SavePath
 	if savePath == "" {
 		savePath = s.cfg.DownloadDir
@@ -500,6 +504,7 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 	if len(req.File) > 0 {
 		mi, parseErr := metainfo.Load(bytes_reader(req.File))
 		if parseErr != nil {
+			s.logger.Warn("add torrent rejected", "source", source, "reason", "parse failed", "error", parseErr)
 			return nil, fmt.Errorf("parsing torrent file: %w", parseErr)
 		}
 		t, err = s.client.AddTorrent(mi)
@@ -514,14 +519,16 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 				t.AddTrackers(DefaultPublicTrackers)
 			}
 		} else if strings.HasPrefix(req.URI, "data:application/x-bittorrent;base64,") {
-			// Base64-encoded .torrent file from Prism/Pilot plugin.
+			// Base64-encoded .torrent file from Prism/Pilot plugin or the UI upload path.
 			b64 := req.URI[len("data:application/x-bittorrent;base64,"):]
 			torrentBytes, decErr := base64Decode(b64)
 			if decErr != nil {
+				s.logger.Warn("add torrent rejected", "source", source, "reason", "base64 decode failed", "error", decErr)
 				return nil, fmt.Errorf("decoding base64 torrent: %w", decErr)
 			}
 			mi, parseErr := metainfo.Load(bytes_reader(torrentBytes))
 			if parseErr != nil {
+				s.logger.Warn("add torrent rejected", "source", source, "reason", "parse failed", "error", parseErr)
 				return nil, fmt.Errorf("parsing torrent from base64 data: %w", parseErr)
 			}
 			t, err = s.client.AddTorrent(mi)
@@ -529,16 +536,20 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 			// HTTP/HTTPS URL — download the .torrent file first.
 			t, err = s.addFromURL(ctx, req.URI)
 		} else {
+			s.logger.Warn("add torrent rejected", "source", source, "reason", "unsupported uri scheme")
 			return nil, fmt.Errorf("unsupported URI scheme: %s", req.URI)
 		}
 	} else {
+		s.logger.Warn("add torrent rejected", "source", source, "reason", "empty input")
 		return nil, fmt.Errorf("either uri or file must be provided")
 	}
 
 	if err != nil {
+		s.logger.Warn("add torrent rejected", "source", source, "reason", "engine rejected", "error", err)
 		return nil, fmt.Errorf("adding torrent: %w", err)
 	}
 	if t == nil {
+		s.logger.Warn("add torrent rejected", "source", source, "reason", "duplicate or invalid")
 		return nil, fmt.Errorf("torrent handle is nil (duplicate or invalid)")
 	}
 
@@ -575,10 +586,48 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 		Data:     map[string]any{"name": t.Name()},
 	})
 
+	s.logger.Info("torrent added", "hash", hash, "name", t.Name(), "source", source, "paused", req.Paused)
+
 	// Wait for metadata in background, then start.
 	go s.waitAndStart(mt, hash, req.Paused, req.Sequential, false /* verifyOnStart — fresh add, nothing to verify */)
 
 	return s.torrentInfo(hash, mt), nil
+}
+
+// classifyAddSource maps an AddRequest to a short source label used in
+// log lines. Stable strings — operators may grep for them.
+func classifyAddSource(req AddRequest) string {
+	if len(req.File) > 0 {
+		return "file"
+	}
+	switch {
+	case strings.HasPrefix(req.URI, "magnet:"):
+		return "magnet"
+	case strings.HasPrefix(req.URI, "data:application/x-bittorrent;base64,"):
+		return "data-uri"
+	case strings.HasPrefix(req.URI, "http://"), strings.HasPrefix(req.URI, "https://"):
+		return "http"
+	case req.URI == "":
+		return "empty"
+	default:
+		return "unknown"
+	}
+}
+
+// uriPreview returns a short, log-safe prefix of the URI. Magnet hashes and
+// HTTP URLs are kept; data URIs are truncated so we never spam the log
+// with a base64 blob.
+func uriPreview(uri string) string {
+	if uri == "" {
+		return ""
+	}
+	if strings.HasPrefix(uri, "data:application/x-bittorrent;base64,") {
+		return "data:application/x-bittorrent;base64,…"
+	}
+	if len(uri) > 200 {
+		return uri[:200] + "…"
+	}
+	return uri
 }
 
 // Get returns info about a specific torrent.
