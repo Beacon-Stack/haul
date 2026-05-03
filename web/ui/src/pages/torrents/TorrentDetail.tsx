@@ -9,7 +9,7 @@ import {
   useTorrentPieces,
   useTorrentTrackers,
 } from "@/api/torrents";
-import { Pause, Play, Trash2, FileText } from "lucide-react";
+import { Pause, Play, Trash2, FileText, Link2, Hash, Download } from "lucide-react";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
 import { useConfirm } from "@beacon-shared/ConfirmDialog";
@@ -123,6 +123,28 @@ export default function TorrentDetail() {
           <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--color-text-muted)", fontFamily: "var(--font-family-mono)" }}>{t.info_hash}</p>
         </div>
         <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          <button
+            onClick={() => copyToClipboard(buildMagnet(t.info_hash, t.name), "Magnet link copied")}
+            title="Copy magnet link"
+            style={ghostBtnStyle}
+          >
+            <Link2 size={13} /> Magnet
+          </button>
+          <button
+            onClick={() => copyToClipboard(t.info_hash, "Info hash copied")}
+            title="Copy info hash"
+            style={ghostBtnStyle}
+          >
+            <Hash size={13} /> Hash
+          </button>
+          <a
+            href={`/api/v1/torrents/${t.info_hash}/torrent_file`}
+            download
+            title="Download .torrent file"
+            style={{ ...ghostBtnStyle, textDecoration: "none" }}
+          >
+            <Download size={13} /> .torrent
+          </a>
           {t.status === "paused" ? (
             <button onClick={() => resume.mutate(t.info_hash)} style={btnStyle("var(--color-accent)")}>
               <Play size={13} /> Resume
@@ -267,4 +289,56 @@ function btnStyle(color: string): React.CSSProperties {
     fontWeight: 500,
     cursor: "pointer",
   };
+}
+
+// Quieter button variant for the copy / export actions — same shape
+// but neutral colors so the primary Pause/Delete still pop.
+const ghostBtnStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 5,
+  padding: "6px 12px",
+  borderRadius: 6,
+  border: "1px solid var(--color-border-default)",
+  background: "transparent",
+  color: "var(--color-text-secondary)",
+  fontSize: 12,
+  fontWeight: 500,
+  cursor: "pointer",
+};
+
+// buildMagnet composes a minimal magnet URI from the info hash + name.
+// We don't include trackers — they're per-torrent and would need a
+// separate fetch; the recipient's client picks up trackers via DHT/PEX
+// once the magnet resolves.
+function buildMagnet(infoHash: string, name: string): string {
+  const dn = encodeURIComponent(name);
+  return `magnet:?xt=urn:btih:${infoHash}&dn=${dn}`;
+}
+
+// copyToClipboard wraps the navigator.clipboard API with a fallback for
+// non-secure contexts (HTTP localhost is fine; HTTP on a LAN IP isn't).
+async function copyToClipboard(text: string, successMsg: string) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+    } else {
+      // Fallback: synthesize a hidden textarea, select, execCommand. Works
+      // in Firefox / Safari over plain HTTP where the clipboard API
+      // refuses. Yes execCommand is deprecated; the clipboard API is the
+      // only real option in secure contexts and execCommand is the only
+      // option in non-secure ones.
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    }
+    toast.success(successMsg);
+  } catch (e) {
+    toast.error(`Couldn't copy to clipboard: ${(e as Error).message}`);
+  }
 }

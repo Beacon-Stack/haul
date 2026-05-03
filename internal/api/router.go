@@ -2,8 +2,10 @@ package api
 
 import (
 	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
@@ -18,6 +20,21 @@ import (
 	adminpkg "github.com/beacon-stack/haul/internal/db/admin"
 	"github.com/beacon-stack/haul/internal/version"
 )
+
+// sanitizeFilename strips characters that would confuse filesystems or
+// Content-Disposition parsers. We don't try for full RFC 5987 — just
+// drop the obvious offenders.
+func sanitizeFilename(s string) string {
+	r := strings.NewReplacer(
+		`"`, "_",
+		`\`, "_",
+		"/", "_",
+		"\x00", "",
+		"\n", " ",
+		"\r", " ",
+	)
+	return r.Replace(s)
+}
 
 // RouterConfig holds everything the router needs.
 type RouterConfig struct {
@@ -53,6 +70,28 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	if cfg.WSHub != nil {
 		r.Get("/api/v1/ws", cfg.WSHub.ServeHTTP)
 	}
+
+	// .torrent file export. Registered as a chi route because Huma
+	// shapes responses as JSON; we want to stream raw BYTEA bytes with
+	// a Content-Disposition header so a browser fetch can save-as.
+	r.Get("/api/v1/torrents/{hash}/torrent_file", func(w http.ResponseWriter, r *http.Request) {
+		hash := chi.URLParam(r, "hash")
+		data, err := cfg.Session.ExportTorrent(hash)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		// Try to get the torrent name for the filename header. Falls
+		// back to the hash if metadata isn't available.
+		name := hash
+		if info, err := cfg.Session.Get(hash); err == nil && info.Name != "" {
+			name = info.Name
+		}
+		w.Header().Set("Content-Type", "application/x-bittorrent")
+		w.Header().Set("Content-Disposition", `attachment; filename="`+sanitizeFilename(name)+`.torrent"`)
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+		_, _ = w.Write(data)
+	})
 
 	// Health check
 	r.Get("/health", func(w http.ResponseWriter, _ *http.Request) {
