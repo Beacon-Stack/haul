@@ -78,6 +78,14 @@ func Load(cfgFile string) (*Config, error) {
 	v.SetDefault("schedule.from_hour", 8)
 	v.SetDefault("schedule.to_hour", 20)
 	v.SetDefault("schedule.days", "all")
+	// Admin diagnostics tab — default OFF. Operators flip this on in .env
+	// when they need to inspect/clean orphan DB rows. Without the
+	// SetDefault, AutomaticEnv silently drops HAUL_ADMIN_DIAGNOSTICS_ENABLED
+	// (same Viper gotcha as torrent.pause_on_complete).
+	v.SetDefault("admin.diagnostics_enabled", false)
+	// Soft-deleted rows in cleanup_history retain for this many days
+	// before the daily sweep hard-deletes them.
+	v.SetDefault("cleanup.retention_days", 30)
 
 	if cfgFile != "" {
 		v.SetConfigFile(cfgFile)

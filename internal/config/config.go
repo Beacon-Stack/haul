@@ -16,6 +16,8 @@ type Config struct {
 	Schedule  SpeedScheduleConfig `mapstructure:"schedule"`
 	Webhooks  []WebhookConfig     `mapstructure:"webhooks"`
 	Pulse     PulseConfig         `mapstructure:"pulse"`
+	Admin     AdminConfig         `mapstructure:"admin"`
+	Cleanup   CleanupConfig       `mapstructure:"cleanup"`
 
 	// ConfigFile is the path of the config file that was loaded, if any.
 	ConfigFile string `mapstructure:"-"`
@@ -163,6 +165,20 @@ type PulseConfig struct {
 	// Pulse's API key. When non-empty, its contents replace APIKey at
 	// load time.
 	APIKeyFile string `mapstructure:"api_key_file"`
+}
+
+// AdminConfig gates the admin-only diagnostic & cleanup endpoints.
+// Default off — most operators never need them. Flip to true via
+// HAUL_ADMIN_DIAGNOSTICS_ENABLED to expose Settings → System → Diagnostics.
+type AdminConfig struct {
+	DiagnosticsEnabled bool `mapstructure:"diagnostics_enabled"`
+}
+
+// CleanupConfig controls the soft-delete retention shim used by the
+// admin diagnostics tab. Soft-deleted rows live in the cleanup_history
+// table for RetentionDays days, then a daily sweep hard-deletes them.
+type CleanupConfig struct {
+	RetentionDays int `mapstructure:"retention_days"`
 }
 
 // AppName returns the application name constant for use in config paths.
