@@ -130,6 +130,14 @@ func main() {
 		"utp", cfg.Torrent.EnableUTP,
 	)
 
+	// Auto-add `.torrent` files dropped into the configured directory.
+	// Empty WatchDir disables the watcher entirely.
+	if cfg.Torrent.WatchDir != "" {
+		if err := session.StartWatchDir(context.Background(), cfg.Torrent.WatchDir); err != nil {
+			logger.Warn("watch dir startup failed; auto-add disabled", "error", err)
+		}
+	}
+
 	// ── Pulse integration ─────────────────────────────────────────────────
 	// Registers with Pulse using retry/backoff (~2 minutes). If Pulse is
 	// unreachable, Haul continues in standalone mode. The service API key
