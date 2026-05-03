@@ -57,17 +57,50 @@ func TestClassifyStalled(t *testing.T) {
 		}
 	})
 
-	t.Run("PreMetadataNeverStalled", func(t *testing.T) {
+	t.Run("PreMetadataInsideFirstPeerWindow_NotStalled", func(t *testing.T) {
+		// A magnet that hasn't seen its metainfo yet AND hasn't been
+		// around long enough to trip the no-peers-ever window stays
+		// unclassified. Activity-based rules can't run without metainfo.
 		p := base
 		p.hasInfo = false
+		p.bytesMissing = 0
+		p.addedAt = justStarted // < firstPeerTimeout — rule 3 does NOT fire
 		if classifyStalled(p) {
-			t.Error("pre-metadata torrent was stalled; should be unclassified until metadata arrives")
+			t.Error("pre-metadata fresh add was stalled; should not classify until firstPeerTimeout elapses")
+		}
+	})
+
+	t.Run("PreMetadataNoPeersEver_StallsForDeadMagnet", func(t *testing.T) {
+		// REGRESSION: The dashboard's "Stalled" filter pill silently read
+		// 0 even when /api/v1/stalls listed the torrent. Root cause —
+		// classifyStalled returned false on `!hasInfo`, so a pre-metadata
+		// dead magnet (no peers ever, no metainfo) had Info.Stalled=false
+		// while ListStalled returned it as no_peers_ever. The pill counter
+		// derived from Info.Stalled, so it stayed at 0.
+		// The fix: rule 3 (no peers ever past firstPeerTimeout) must fire
+		// regardless of metadata state, matching CheckStalls/ListStalled.
+		p := base
+		p.hasInfo = false
+		p.bytesMissing = 0
+		// addedAt is `wayBack` (1h ago) — past the 3-min firstPeerTimeout.
+		p.firstPeerAt = nil
+		if !classifyStalled(p) {
+			t.Error("REGRESSION: pre-metadata dead magnet was NOT stalled — " +
+				"the dashboard Stalled filter pill will read 0 again. " +
+				"See classify_stalled_test.go header comment.")
 		}
 	})
 
 	t.Run("FullyDownloadedNeverStalled", func(t *testing.T) {
+		// A completed torrent (bytesMissing=0) shouldn't classify as
+		// stalled. Need firstPeerAt set so rule 3 doesn't trip first —
+		// the activity-based stall states only matter while bytes are
+		// still missing, but a finished torrent that long-ago saw a peer
+		// is the realistic case (downloaded fully, now sitting at 100%).
 		p := base
 		p.bytesMissing = 0
+		fp := now.Add(-10 * time.Minute)
+		p.firstPeerAt = &fp
 		if classifyStalled(p) {
 			t.Error("bytesMissing=0 was stalled; completed work can't stall")
 		}
