@@ -77,10 +77,34 @@ function DiagnosticCard({ summary }: { summary: DiagnosticSummary }) {
   const [open, setOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [hardDelete, setHardDelete] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const detail = useDiagnostic(open ? summary.name : null);
   const cleanup = useCleanupDiagnostic();
 
   const isFlagged = summary.row_count > 0;
+  const rows = detail.data?.rows ?? [];
+  const allSelected = rows.length > 0 && selected.size === rows.length;
+  const someSelected = selected.size > 0 && !allSelected;
+  // What gets cleaned up: explicit selection if any, otherwise "all".
+  const cleanupTargets = selected.size > 0
+    ? { ids: Array.from(selected) }
+    : { all: true };
+  const cleanupCount = selected.size > 0 ? selected.size : rows.length;
+
+  function toggleRow(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    setSelected((prev) =>
+      prev.size === rows.length ? new Set() : new Set(rows.map((r) => r.id))
+    );
+  }
 
   return (
     <div
@@ -120,32 +144,91 @@ function DiagnosticCard({ summary }: { summary: DiagnosticSummary }) {
         <div style={{ borderTop: "1px solid var(--color-border-subtle)", padding: 18 }}>
           {detail.isLoading ? (
             <div style={{ color: "var(--color-text-muted)", fontSize: 13 }}>Loading rows…</div>
-          ) : detail.data?.rows.length ? (
+          ) : rows.length ? (
             <>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
                 <thead>
                   <tr style={{ textAlign: "left", color: "var(--color-text-muted)" }}>
+                    <th style={{ ...cellStyle, width: 28 }}>
+                      <input
+                        type="checkbox"
+                        checked={allSelected}
+                        ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                        onChange={toggleAll}
+                        title={allSelected ? "Deselect all" : "Select all"}
+                        style={{ cursor: "pointer" }}
+                      />
+                    </th>
                     <th style={cellStyle}>ID</th>
                     <th style={cellStyle}>Summary</th>
                     <th style={cellStyle}>Why</th>
+                    <th style={{ ...cellStyle, width: 1 }}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {detail.data.rows.map((r) => (
-                    <tr key={r.id} style={{ borderTop: "1px solid var(--color-border-subtle)" }}>
-                      <td style={{ ...cellStyle, fontFamily: "var(--font-family-mono)", fontSize: 11 }}>
-                        {r.id.length > 16 ? `${r.id.slice(0, 12)}…` : r.id}
-                      </td>
-                      <td style={cellStyle}>{r.summary}</td>
-                      <td style={{ ...cellStyle, color: "var(--color-text-muted)", fontSize: 12 }}>{r.why_flagged}</td>
-                    </tr>
-                  ))}
+                  {rows.map((r) => {
+                    const isSelected = selected.has(r.id);
+                    return (
+                      <tr
+                        key={r.id}
+                        onClick={() => toggleRow(r.id)}
+                        style={{
+                          borderTop: "1px solid var(--color-border-subtle)",
+                          background: isSelected ? "var(--color-accent-muted)" : "transparent",
+                          cursor: "pointer",
+                        }}
+                      >
+                        <td style={{ ...cellStyle, width: 28 }}>
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleRow(r.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            style={{ cursor: "pointer" }}
+                          />
+                        </td>
+                        <td style={{ ...cellStyle, fontFamily: "var(--font-family-mono)", fontSize: 11 }}>
+                          {r.id.length > 16 ? `${r.id.slice(0, 12)}…` : r.id}
+                        </td>
+                        <td style={cellStyle}>{r.summary}</td>
+                        <td style={{ ...cellStyle, color: "var(--color-text-muted)", fontSize: 12 }}>{r.why_flagged}</td>
+                        <td style={{ ...cellStyle, whiteSpace: "nowrap", textAlign: "right" }}>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelected(new Set([r.id]));
+                              setConfirmOpen(true);
+                            }}
+                            title="Clean up just this row"
+                            style={iconButtonStyle}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
-              <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end" }}>
-                <button onClick={() => setConfirmOpen(true)} style={dangerButtonStyle}>
-                  <Trash2 size={14} /> Clean up all {detail.data.rows.length}
-                </button>
+              <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+                  {selected.size > 0
+                    ? `${selected.size} selected`
+                    : `Click rows or use the checkboxes to select. Clean up acts on selection — or all rows when nothing is selected.`}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  {selected.size > 0 && (
+                    <button onClick={() => setSelected(new Set())} style={cancelButtonStyle}>
+                      Clear selection
+                    </button>
+                  )}
+                  <button onClick={() => setConfirmOpen(true)} style={dangerButtonStyle}>
+                    <Trash2 size={14} />
+                    {selected.size > 0
+                      ? ` Clean up ${selected.size} selected`
+                      : ` Clean up all ${rows.length}`}
+                  </button>
+                </div>
               </div>
             </>
           ) : (
@@ -157,7 +240,7 @@ function DiagnosticCard({ summary }: { summary: DiagnosticSummary }) {
       {confirmOpen && detail.data && (
         <ConfirmModal
           name={summary.description}
-          rowCount={detail.data.rows.length}
+          rowCount={cleanupCount}
           suggested={detail.data.rows[0]?.suggested_action ?? "Delete the matching rows"}
           hardDelete={hardDelete}
           onHardDeleteChange={setHardDelete}
@@ -168,7 +251,7 @@ function DiagnosticCard({ summary }: { summary: DiagnosticSummary }) {
           onConfirm={() => {
             const mode: CleanupMode = hardDelete ? "hard" : "soft";
             cleanup.mutate(
-              { name: summary.name, body: { all: true, mode } },
+              { name: summary.name, body: { ...cleanupTargets, mode } },
               {
                 onSuccess: (res) => {
                   toast.success(
@@ -178,6 +261,7 @@ function DiagnosticCard({ summary }: { summary: DiagnosticSummary }) {
                   );
                   setConfirmOpen(false);
                   setHardDelete(false);
+                  setSelected(new Set()); // selection is stale after delete
                 },
                 onError: (e) => toast.error((e as Error).message),
               }
@@ -308,4 +392,13 @@ const dangerButtonStyle: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   gap: 6,
+};
+const iconButtonStyle: React.CSSProperties = {
+  background: "transparent",
+  border: "none",
+  color: "var(--color-text-muted)",
+  cursor: "pointer",
+  padding: 4,
+  display: "inline-flex",
+  alignItems: "center",
 };
