@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   Rss,
   Settings,
+  Stethoscope,
 } from "lucide-react";
 import Shell, { type NavItem } from "@beacon-shared/Shell";
 import { useWebSocket } from "@/api/websocket";
@@ -18,6 +19,11 @@ const mainNav: NavItem[] = [
   { to: "/categories", icon: FolderOpen, label: "Categories" },
   { to: "/media-management", icon: FileText, label: "Media Mgmt" },
   { to: "/rss", icon: Rss, label: "RSS Feeds" },
+  // System lives below Settings — it's the admin-only escape hatch for
+  // inspecting/cleaning DB rows that the regular UI doesn't surface.
+  // Always shown; the page itself explains what to do if the
+  // HAUL_ADMIN_DIAGNOSTICS_ENABLED flag is off.
+  { to: "/system/diagnostics", icon: Stethoscope, label: "System" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
