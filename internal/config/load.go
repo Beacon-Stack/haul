@@ -74,6 +74,9 @@ func Load(cfgFile string) (*Config, error) {
 	// DataDir must be on a persistent volume — see TorrentConfig.DataDir
 	// comment for why. `/config` is the Docker volume mount path.
 	v.SetDefault("torrent.data_dir", "/config")
+	// WatchDir defaults to empty (auto-add disabled). Operators flip
+	// HAUL_TORRENT_WATCH_DIR=/some/path to enable.
+	v.SetDefault("torrent.watch_dir", "")
 	v.SetDefault("schedule.enabled", false)
 	v.SetDefault("schedule.from_hour", 8)
 	v.SetDefault("schedule.to_hour", 20)

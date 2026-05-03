@@ -63,6 +63,12 @@ type TorrentConfig struct {
 	// anacrolix's in-memory completion map will be empty even though the
 	// downloaded bytes are still on disk. Defaults to "/config".
 	DataDir string `mapstructure:"data_dir"`
+	// WatchDir is a path that haul monitors for `.torrent` files. Files
+	// dropped here are auto-added; the source file is deleted on success
+	// or renamed to <name>.invalid on parse failure. Empty disables
+	// auto-add entirely. Mirrors qBit's "Automatically download
+	// .torrents from this directory" behavior option.
+	WatchDir string `mapstructure:"watch_dir"`
 	// MaxActiveDownloads is the max concurrent downloading torrents. 0 = unlimited.
 	MaxActiveDownloads int `mapstructure:"max_active_downloads"`
 	// MaxActiveUploads is the max concurrent seeding torrents. 0 = unlimited.
