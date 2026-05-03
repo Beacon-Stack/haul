@@ -15,6 +15,7 @@ import (
 	"github.com/beacon-stack/haul/internal/core/category"
 	"github.com/beacon-stack/haul/internal/core/tag"
 	"github.com/beacon-stack/haul/internal/core/torrent"
+	adminpkg "github.com/beacon-stack/haul/internal/db/admin"
 	"github.com/beacon-stack/haul/internal/version"
 )
 
@@ -26,6 +27,17 @@ type RouterConfig struct {
 	Categories *category.Service
 	Tags       *tag.Service
 	DB         *sql.DB
+	// Admin gates the diagnostics + cleanup-history endpoints. When nil
+	// or DiagnosticsEnabled=false the routes are not registered at all
+	// (404 on every /api/v1/admin/* path).
+	Admin *AdminGate
+}
+
+// AdminGate is the runtime knob for the admin-only endpoints. Held by
+// RouterConfig so routes can choose to skip registration when disabled.
+type AdminGate struct {
+	DiagnosticsEnabled bool
+	Registry           *adminpkg.Registry
 }
 
 // NewRouter builds and returns the application HTTP handler.
@@ -63,6 +75,14 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	v1.RegisterStatsRoutes(humaAPI, cfg.Session)
 	v1.RegisterSettingsRoutes(humaAPI, cfg.DB, cfg.Session)
 	v1.RegisterHealthRoutes(humaAPI, cfg.Session)
+
+	// Admin diagnostics — only registered when explicitly enabled, so
+	// the published image's API surface stays minimal for the common
+	// case. Operators flip HAUL_ADMIN_DIAGNOSTICS_ENABLED=true.
+	if cfg.Admin != nil && cfg.Admin.DiagnosticsEnabled && cfg.Admin.Registry != nil {
+		v1.RegisterAdminDiagnosticsRoutes(humaAPI, cfg.Admin.Registry)
+		v1.RegisterAdminCleanupHistoryRoutes(humaAPI, cfg.Admin.Registry)
+	}
 
 	return r
 }
