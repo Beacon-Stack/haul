@@ -34,6 +34,7 @@ import (
 	"github.com/anacrolix/torrent/iplist"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/anacrolix/torrent/storage"
+	"golang.org/x/time/rate"
 
 	"github.com/beacon-stack/haul/internal/config"
 	"github.com/beacon-stack/haul/internal/events"
@@ -220,6 +221,15 @@ type Session struct {
 	mu             sync.RWMutex
 	torrents       map[string]*managedTorrent
 	altSpeedActive bool
+
+	// Rate limiters held as Session fields (not just config) so the
+	// runtime settings dispatcher can call SetLimit on the same
+	// *rate.Limiter that's wired into anacrolix's client. We initialize
+	// them in NewSession even when no limit is configured — at rate.Inf
+	// they're effectively no-ops, but the pointers are stable so SetLimit
+	// at runtime takes effect without rebuilding the client.
+	downloadLimiter *rate.Limiter
+	uploadLimiter   *rate.Limiter
 }
 
 // managedTorrent pairs the library torrent handle with our metadata.
@@ -410,12 +420,27 @@ func NewSession(cfg config.TorrentConfig, db *sql.DB, bus *events.Bus, logger *s
 		ltCfg.TotalHalfOpenConns = cfg.MaxConnections / 2
 	}
 
+	// Build the rate limiters once and hold pointers on Session so the
+	// runtime dispatcher can mutate them via SetLimit/SetBurst without
+	// rebuilding the client. Zero/unset configs are stored as
+	// rate.Inf (effectively no limit) — anacrolix sees a non-nil
+	// limiter that always grants tokens immediately.
+	downLimit := rate.Inf
+	downBurst := 1 << 30 // big enough to never throttle
 	if cfg.GlobalDownloadLimit > 0 {
-		ltCfg.DownloadRateLimiter = newRateLimiter(cfg.GlobalDownloadLimit)
+		downLimit = rate.Limit(cfg.GlobalDownloadLimit)
+		downBurst = cfg.GlobalDownloadLimit
 	}
+	upLimit := rate.Inf
+	upBurst := 1 << 30
 	if cfg.GlobalUploadLimit > 0 {
-		ltCfg.UploadRateLimiter = newRateLimiter(cfg.GlobalUploadLimit)
+		upLimit = rate.Limit(cfg.GlobalUploadLimit)
+		upBurst = cfg.GlobalUploadLimit
 	}
+	downloadLimiter := rate.NewLimiter(downLimit, downBurst)
+	uploadLimiter := rate.NewLimiter(upLimit, upBurst)
+	ltCfg.DownloadRateLimiter = downloadLimiter
+	ltCfg.UploadRateLimiter = uploadLimiter
 
 	client, err := lt.NewClient(ltCfg)
 	if err != nil && cfg.ListenPort != 0 {
@@ -439,6 +464,8 @@ func NewSession(cfg config.TorrentConfig, db *sql.DB, bus *events.Bus, logger *s
 		pauseOnComplete:    cfg.PauseOnComplete,
 		maxActiveDownloads: cfg.MaxActiveDownloads,
 		pieceCompletion:    pieceCompletion,
+		downloadLimiter:    downloadLimiter,
+		uploadLimiter:      uploadLimiter,
 	}
 
 	// Runtime settings overlay: the `settings` DB table is the persistent
@@ -1083,6 +1110,42 @@ func (s *Session) SetMaxActiveDownloads(n int) {
 	s.runtimeMu.Unlock()
 
 	s.enforceMaxActiveDownloads(context.Background())
+}
+
+// SetGlobalDownloadLimit updates the global download rate limit at
+// runtime. n is in bytes per second; n == 0 means unlimited. Operates
+// on the *rate.Limiter that was wired into anacrolix's client at
+// startup, so the new limit applies immediately to every active
+// torrent without rebuilding the engine.
+func (s *Session) SetGlobalDownloadLimit(n int) {
+	if s.downloadLimiter == nil {
+		return // shouldn't happen — we always init in NewSession
+	}
+	if n <= 0 {
+		s.logger.Info("download rate limit changed via settings API", "to", "unlimited")
+		s.downloadLimiter.SetLimit(rate.Inf)
+		s.downloadLimiter.SetBurst(1 << 30)
+		return
+	}
+	s.logger.Info("download rate limit changed via settings API", "bytes_per_sec", n)
+	s.downloadLimiter.SetLimit(rate.Limit(n))
+	s.downloadLimiter.SetBurst(n)
+}
+
+// SetGlobalUploadLimit mirrors SetGlobalDownloadLimit for upload.
+func (s *Session) SetGlobalUploadLimit(n int) {
+	if s.uploadLimiter == nil {
+		return
+	}
+	if n <= 0 {
+		s.logger.Info("upload rate limit changed via settings API", "to", "unlimited")
+		s.uploadLimiter.SetLimit(rate.Inf)
+		s.uploadLimiter.SetBurst(1 << 30)
+		return
+	}
+	s.logger.Info("upload rate limit changed via settings API", "bytes_per_sec", n)
+	s.uploadLimiter.SetLimit(rate.Limit(n))
+	s.uploadLimiter.SetBurst(n)
 }
 
 // queueCandidate is one entry in the queue-gate decision input.

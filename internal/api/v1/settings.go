@@ -70,6 +70,19 @@ func applyRuntimeSettings(session *torrent.Session, updates map[string]string) [
 				session.SetMaxActiveDownloads(n)
 				applied = append(applied, k)
 			}
+		case "download_rate_limit", "global_download_limit":
+			// Both keys accepted — the UI used `download_rate_limit`
+			// but earlier config talked about `global_download_limit`.
+			// Treat them as aliases so future renames don't bork users.
+			if n, err := strconv.Atoi(v); err == nil {
+				session.SetGlobalDownloadLimit(n)
+				applied = append(applied, k)
+			}
+		case "upload_rate_limit", "global_upload_limit":
+			if n, err := strconv.Atoi(v); err == nil {
+				session.SetGlobalUploadLimit(n)
+				applied = append(applied, k)
+			}
 		}
 	}
 	return applied
