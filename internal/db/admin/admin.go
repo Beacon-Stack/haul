@@ -66,10 +66,12 @@ type CleanupRequest struct {
 	Mode CleanupMode
 }
 
-// CleanupResult is what cleanup() returns to the handler.
+// CleanupResult is what cleanup() returns to the handler. HistoryEntryIDs
+// is populated only in soft mode; the frontend uses it to offer an Undo
+// affordance on the success toast that calls restore for each id.
 type CleanupResult struct {
-	RowsDeleted    int   `json:"rows_deleted"`
-	HistoryEntryID int64 `json:"history_entry_id,omitempty"` // 0 if hard mode
+	RowsDeleted      int     `json:"rows_deleted"`
+	HistoryEntryIDs  []int64 `json:"history_entry_ids,omitempty"` // empty slice in hard mode
 }
 
 // Diagnostic is the contract every named diagnostic implements.
