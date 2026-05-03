@@ -203,7 +203,7 @@ export default function TorrentDetail() {
       {/* Trackers — configured list only, no live status. Default closed
           because the data is static and rarely inspected. */}
       <CollapsibleSection label="Trackers" count={trackers.length} defaultOpen={false}>
-        <TrackerList trackers={trackers} />
+        <TrackerList trackers={trackers} hash={t.info_hash} />
       </CollapsibleSection>
 
       {/* Meta */}
