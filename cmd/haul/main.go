@@ -18,11 +18,27 @@ import (
 	"github.com/beacon-stack/haul/internal/core/tag"
 	"github.com/beacon-stack/haul/internal/core/torrent"
 	"github.com/beacon-stack/haul/internal/db"
+	"github.com/beacon-stack/haul/internal/db/admin"
 	"github.com/beacon-stack/haul/internal/events"
 	"github.com/beacon-stack/haul/internal/pulse"
 	"github.com/beacon-stack/haul/internal/version"
 	"github.com/beacon-stack/haul/web"
 )
+
+// sessionAdminAdapter adapts the torrent.Session to the narrow surface
+// the admin/orphan_torrents diagnostic needs (just LiveHashes — orphan
+// cleanup goes directly to the DB since the rows are by definition NOT
+// in memory). Defined here rather than on Session itself so the admin
+// package doesn't have to import core/torrent.
+type sessionAdminAdapter struct{ s *torrent.Session }
+
+func (a *sessionAdminAdapter) LiveHashes() map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, t := range a.s.List() {
+		out[t.InfoHash] = struct{}{}
+	}
+	return out
+}
 
 func main() {
 	cfgFile := flag.String("config", "", "path to config file")
@@ -191,6 +207,45 @@ func main() {
 		}
 	}()
 
+	// ── Admin diagnostics (gated by HAUL_ADMIN_DIAGNOSTICS_ENABLED) ───────
+	// Off by default; operators flip it on in .env when they need to
+	// inspect/clean orphan DB rows. When off the router skips registering
+	// the routes entirely (404 on every /api/v1/admin/* path).
+	var adminGate *api.AdminGate
+	if cfg.Admin.DiagnosticsEnabled {
+		adminRegistry := admin.New(database.SQL, logger)
+		adminRegistry.Register(admin.NewOrphanTorrents(database.SQL, &sessionAdminAdapter{session}))
+		adminGate = &api.AdminGate{
+			DiagnosticsEnabled: true,
+			Registry:           adminRegistry,
+		}
+
+		// Daily purge sweep: drops cleanup_history rows older than retention.
+		retentionDays := cfg.Cleanup.RetentionDays
+		if retentionDays <= 0 {
+			retentionDays = 30
+		}
+		retention := time.Duration(retentionDays) * 24 * time.Hour
+		go func() {
+			// Run once shortly after startup so a bench / fresh container
+			// gets a clean slate without waiting 24h.
+			time.Sleep(30 * time.Second)
+			if _, err := adminRegistry.PurgeOlderThan(context.Background(), retention); err != nil {
+				logger.Warn("cleanup_history initial purge failed", "error", err)
+			}
+			t := time.NewTicker(24 * time.Hour)
+			defer t.Stop()
+			for range t.C {
+				if _, err := adminRegistry.PurgeOlderThan(context.Background(), retention); err != nil {
+					logger.Warn("cleanup_history daily purge failed", "error", err)
+				}
+			}
+		}()
+		logger.Info("admin diagnostics enabled",
+			"retention_days", retentionDays,
+		)
+	}
+
 	// ── HTTP router ───────────────────────────────────────────────────────
 	router := api.NewRouter(api.RouterConfig{
 		Logger:     logger,
@@ -199,6 +254,7 @@ func main() {
 		Categories: categorySvc,
 		Tags:       tagSvc,
 		DB:         database.SQL,
+		Admin:      adminGate,
 	})
 
 	// Mount the embedded web UI as a catch-all.
