@@ -23,7 +23,9 @@ export interface DiagnosticDetail {
 
 export interface CleanupResult {
   rows_deleted: number;
-  history_entry_id?: number;
+  // Populated only in soft mode — used to wire an Undo action on the
+  // success toast that calls restore for each id.
+  history_entry_ids?: number[];
 }
 
 export type CleanupMode = "soft" | "hard";

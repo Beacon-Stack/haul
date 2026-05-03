@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { AlertTriangle, ChevronDown, ChevronRight, Trash2, History } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   useDiagnostics,
   useDiagnostic,
@@ -9,6 +10,7 @@ import {
   type DiagnosticSummary,
   type CleanupMode,
 } from "@/api/adminDiagnostics";
+import { apiFetch } from "@/api/client";
 
 // Settings → System → Diagnostics. Lists every named diagnostic the
 // service knows about. Each card expands inline to show matching rows
@@ -80,6 +82,28 @@ function DiagnosticCard({ summary }: { summary: DiagnosticSummary }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const detail = useDiagnostic(open ? summary.name : null);
   const cleanup = useCleanupDiagnostic();
+  const qc = useQueryClient();
+
+  // undoSoftCleanup re-issues a restore request for each cleanup_history
+  // ID returned from the just-completed soft delete. Restore endpoints
+  // are independent (one fail doesn't block others); use Promise.allSettled
+  // so a PK-conflict on one row doesn't tank the rest.
+  async function undoSoftCleanup(historyIDs: number[]) {
+    const results = await Promise.allSettled(
+      historyIDs.map((id) =>
+        apiFetch<{ restored: boolean }>(`/admin/cleanup-history/${id}/restore`, { method: "POST" })
+      )
+    );
+    const ok = results.filter((r) => r.status === "fulfilled" && (r.value as { restored: boolean }).restored).length;
+    qc.invalidateQueries({ queryKey: ["admin", "diagnostics"] });
+    qc.invalidateQueries({ queryKey: ["admin", "cleanup-history"] });
+    qc.invalidateQueries({ queryKey: ["torrents"] });
+    if (ok === historyIDs.length) {
+      toast.success(`Restored ${ok} row${ok === 1 ? "" : "s"}`);
+    } else {
+      toast.warning(`Restored ${ok} of ${historyIDs.length} rows (others may already exist)`);
+    }
+  }
 
   const isFlagged = summary.row_count > 0;
   const rows = detail.data?.rows ?? [];
@@ -254,11 +278,29 @@ function DiagnosticCard({ summary }: { summary: DiagnosticSummary }) {
               { name: summary.name, body: { ...cleanupTargets, mode } },
               {
                 onSuccess: (res) => {
-                  toast.success(
-                    mode === "hard"
-                      ? `Permanently deleted ${res.rows_deleted} row${res.rows_deleted === 1 ? "" : "s"}`
-                      : `Moved ${res.rows_deleted} row${res.rows_deleted === 1 ? "" : "s"} to cleanup history`
-                  );
+                  if (mode === "hard") {
+                    toast.success(
+                      `Permanently deleted ${res.rows_deleted} row${res.rows_deleted === 1 ? "" : "s"}`
+                    );
+                  } else {
+                    // Soft delete — surface an Undo action that calls
+                    // restore on each captured history id. 10s window
+                    // (sonner default ~4s is too tight for "did I mean
+                    // to do that?").
+                    const historyIDs = res.history_entry_ids ?? [];
+                    toast.success(
+                      `Moved ${res.rows_deleted} row${res.rows_deleted === 1 ? "" : "s"} to cleanup history`,
+                      historyIDs.length > 0
+                        ? {
+                            duration: 10_000,
+                            action: {
+                              label: "Undo",
+                              onClick: () => { void undoSoftCleanup(historyIDs); },
+                            },
+                          }
+                        : undefined
+                    );
+                  }
                   setConfirmOpen(false);
                   setHardDelete(false);
                   setSelected(new Set()); // selection is stale after delete

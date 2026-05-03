@@ -130,10 +130,13 @@ func (o *OrphanTorrents) Cleanup(ctx context.Context, req CleanupRequest) (Clean
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	var historyIDs []int64
 	if req.Mode == ModeSoft {
-		if err := captureTorrentsToHistory(ctx, tx, o.Name(), confirmed); err != nil {
+		ids, err := captureTorrentsToHistory(ctx, tx, o.Name(), confirmed)
+		if err != nil {
 			return CleanupResult{}, err
 		}
+		historyIDs = ids
 	}
 
 	// Direct DELETE FROM torrents — orphans aren't in the engine, so
@@ -157,21 +160,22 @@ func (o *OrphanTorrents) Cleanup(ctx context.Context, req CleanupRequest) (Clean
 	if err := tx.Commit(); err != nil {
 		return CleanupResult{}, err
 	}
-	return CleanupResult{RowsDeleted: int(deleted)}, nil
+	return CleanupResult{RowsDeleted: int(deleted), HistoryEntryIDs: historyIDs}, nil
 }
 
 // captureTorrentsToHistory snapshots torrents rows into cleanup_history
 // within the supplied transaction. row_to_json over the full row keeps
 // us schema-agnostic — new columns added in future migrations get
-// captured automatically.
-func captureTorrentsToHistory(ctx context.Context, tx *sql.Tx, diagnosticName string, hashes []string) error {
+// captured automatically. Returns the inserted history-row IDs so the
+// caller can hand them back to the frontend for an undo affordance.
+func captureTorrentsToHistory(ctx context.Context, tx *sql.Tx, diagnosticName string, hashes []string) ([]int64, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT info_hash, row_to_json(t)::jsonb::text
 		  FROM torrents t
 		 WHERE info_hash = ANY($1)
 	`, pgArray(hashes))
 	if err != nil {
-		return fmt.Errorf("snapshotting torrents: %w", err)
+		return nil, fmt.Errorf("snapshotting torrents: %w", err)
 	}
 	defer rows.Close()
 
@@ -181,22 +185,23 @@ func captureTorrentsToHistory(ctx context.Context, tx *sql.Tx, diagnosticName st
 		var pk string
 		var rowJSON []byte
 		if err := rows.Scan(&pk, &rowJSON); err != nil {
-			return fmt.Errorf("scanning torrents snapshot: %w", err)
+			return nil, fmt.Errorf("scanning torrents snapshot: %w", err)
 		}
 		pks = append(pks, pk)
 		jsons = append(jsons, rowJSON)
 	}
 	if err := rows.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
-	if _, err := InsertCleanupHistory(ctx, tx, CaptureContext{
+	ids, err := InsertCleanupHistory(ctx, tx, CaptureContext{
 		Diagnostic:  diagnosticName,
 		SourceTable: "torrents",
-	}, pks, jsons); err != nil {
-		return err
+	}, pks, jsons)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	return ids, nil
 }
 
 // pgArray formats a string slice as a Postgres ARRAY[…] literal. Using
