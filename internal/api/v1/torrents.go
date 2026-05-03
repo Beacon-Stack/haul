@@ -2,12 +2,58 @@ package v1
 
 import (
 	"context"
+	"encoding/base64"
 	"net/http"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/beacon-stack/haul/internal/core/torrent"
 )
+
+// maxTorrentFileBytes caps the .torrent payload accepted via the data-URI
+// upload path. Real .torrent files are typically <100KB; 10MB is generous
+// even for huge multi-thousand-file torrents and stops accidental or
+// malicious oversized uploads at the handler boundary.
+const maxTorrentFileBytes = 10 * 1024 * 1024
+
+const dataURITorrentPrefix = "data:application/x-bittorrent;base64,"
+
+// validateAddTorrentURI checks the URI is one of the supported schemes
+// before we hand it to Session.Add. The handler returns clean 400s for
+// these so the user sees a precise error instead of a generic 422 from
+// deeper in the engine.
+func validateAddTorrentURI(uri string) error {
+	if uri == "" {
+		return huma.Error400BadRequest("either uri or .torrent file is required")
+	}
+	switch {
+	case strings.HasPrefix(uri, "magnet:"):
+		return nil
+	case strings.HasPrefix(uri, "http://"), strings.HasPrefix(uri, "https://"):
+		return nil
+	case strings.HasPrefix(uri, dataURITorrentPrefix):
+		b64 := uri[len(dataURITorrentPrefix):]
+		decoded, err := base64.StdEncoding.DecodeString(b64)
+		if err != nil {
+			return huma.Error400BadRequest("invalid base64 in .torrent payload: " + err.Error())
+		}
+		if len(decoded) == 0 {
+			return huma.Error400BadRequest(".torrent payload is empty")
+		}
+		if len(decoded) > maxTorrentFileBytes {
+			return huma.Error400BadRequest(".torrent payload exceeds size limit")
+		}
+		// Bencoded torrent files always start with 'd' (a dict). Reject
+		// obvious non-torrents at the boundary.
+		if decoded[0] != 'd' {
+			return huma.Error400BadRequest(".torrent payload is not a bencoded torrent file")
+		}
+		return nil
+	default:
+		return huma.Error400BadRequest("unsupported uri scheme: must be magnet:, http(s)://, or data:application/x-bittorrent;base64,")
+	}
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -104,7 +150,17 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 		Path:        "/api/v1/torrents",
 		Summary:     "Add a torrent",
 		Tags:        []string{"Torrents"},
+		// Lift Huma's 1 MB default so legitimate multi-MB .torrent files
+		// (huge multi-file torrents — Linux distros, datasets, …)
+		// reach the handler. The decoded payload size is enforced
+		// separately by validateAddTorrentURI / maxTorrentFileBytes; this
+		// limit is a transport-level guard, sized to comfortably hold a
+		// 10 MB torrent after base64+JSON expansion.
+		MaxBodyBytes: 16 * 1024 * 1024,
 	}, func(ctx context.Context, input *addTorrentInput) (*torrentOutput, error) {
+		if err := validateAddTorrentURI(input.Body.URI); err != nil {
+			return nil, err
+		}
 		info, err := session.Add(ctx, torrent.AddRequest{
 			URI:      input.Body.URI,
 			Category: input.Body.Category,
