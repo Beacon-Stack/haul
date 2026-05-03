@@ -763,6 +763,93 @@ func (s *Session) Trackers(hash string) ([]TrackerInfo, error) {
 	return result, nil
 }
 
+// AddTrackers appends one or more announce URLs to the torrent at the
+// given tier. Idempotent — duplicates are silently ignored. Empty URLs
+// are skipped. The torrent kicks off an announce on the new trackers
+// asynchronously; effect is visible on next Trackers() call.
+func (s *Session) AddTrackers(hash string, urls []string, tier int) error {
+	s.mu.RLock()
+	mt, ok := s.torrents[hash]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("torrent not found: %s", hash)
+	}
+	clean := make([]string, 0, len(urls))
+	for _, u := range urls {
+		u = strings.TrimSpace(u)
+		if u != "" {
+			clean = append(clean, u)
+		}
+	}
+	if len(clean) == 0 {
+		return nil
+	}
+	// anacrolix's AddTrackers takes [][]string (one slice per tier).
+	// We collapse all URLs into a single tier; multi-tier add isn't
+	// useful for the operator-facing flow ("add this URL").
+	tieredAnnounce := [][]string{clean}
+	if tier > 0 {
+		// Pad earlier tiers with empty slices so anacrolix indexes correctly.
+		tieredAnnounce = make([][]string, tier+1)
+		tieredAnnounce[tier] = clean
+	}
+	mt.t.AddTrackers(tieredAnnounce)
+	s.persistTrackerChange(hash, mt)
+	return nil
+}
+
+// RemoveTracker rebuilds the announce list for the torrent without the
+// given URL. anacrolix doesn't expose a "remove this tracker" call, so
+// we collect the current list, filter out the removed URL, and reset
+// the list via SetAnnounceList.
+func (s *Session) RemoveTracker(hash, url string) error {
+	s.mu.RLock()
+	mt, ok := s.torrents[hash]
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("torrent not found: %s", hash)
+	}
+	url = strings.TrimSpace(url)
+	if url == "" {
+		return fmt.Errorf("empty tracker URL")
+	}
+	mi := mt.t.Metainfo()
+	newList := make([][]string, 0, len(mi.AnnounceList))
+	for _, tier := range mi.AnnounceList {
+		filtered := make([]string, 0, len(tier))
+		for _, u := range tier {
+			if u != url {
+				filtered = append(filtered, u)
+			}
+		}
+		if len(filtered) > 0 {
+			newList = append(newList, filtered)
+		}
+	}
+	mt.t.ModifyTrackers(newList)
+	s.persistTrackerChange(hash, mt)
+	return nil
+}
+
+// persistTrackerChange re-serializes the torrent's metainfo (with the
+// updated tracker list) and writes the new bytes back to torrents.torrent_data.
+// Without this, tracker edits are lost on restart because restoreFromDB
+// rebuilds from the persisted bytes.
+func (s *Session) persistTrackerChange(hash string, mt *managedTorrent) {
+	if s.db == nil {
+		return
+	}
+	mi := mt.t.Metainfo()
+	var buf bytes.Buffer
+	if err := mi.Write(&buf); err != nil {
+		s.logger.Error("failed to encode metainfo after tracker change", "hash", hash, "error", err)
+		return
+	}
+	if _, err := s.db.Exec(`UPDATE torrents SET torrent_data = $1 WHERE info_hash = $2`, buf.Bytes(), hash); err != nil {
+		s.logger.Error("failed to persist tracker change", "hash", hash, "error", err)
+	}
+}
+
 // Swarm returns anacrolix's swarm-level gauges: how many peers it knows
 // about vs how many it has fully connected. Used to diagnose
 // "swarm reports N seeders but we only connected to a few" cases — the

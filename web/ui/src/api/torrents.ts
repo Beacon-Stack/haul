@@ -133,6 +133,29 @@ export function useTorrentTrackers(hash: string) {
   });
 }
 
+export function useAddTrackers(hash: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (urls: string[]) =>
+      apiFetch<unknown>(`/torrents/${hash}/trackers`, {
+        method: "POST",
+        body: JSON.stringify({ urls }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents", hash, "trackers"] }),
+  });
+}
+
+export function useRemoveTracker(hash: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (url: string) =>
+      apiFetch<unknown>(`/torrents/${hash}/trackers?url=${encodeURIComponent(url)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents", hash, "trackers"] }),
+  });
+}
+
 export function useAddTorrent() {
   const qc = useQueryClient();
   return useMutation({

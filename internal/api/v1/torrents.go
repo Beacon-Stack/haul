@@ -113,6 +113,19 @@ type emptyOutput struct {
 	Body struct{}
 }
 
+type addTrackersInput struct {
+	Hash string `path:"hash" doc:"Torrent info hash"`
+	Body struct {
+		URLs []string `json:"urls"           doc:"One or more announce URLs"`
+		Tier int      `json:"tier,omitempty" doc:"Tier index (0 = highest priority, default 0)"`
+	}
+}
+
+type removeTrackerInput struct {
+	Hash string `path:"hash" doc:"Torrent info hash"`
+	URL  string `query:"url" doc:"Tracker URL to remove"`
+}
+
 // ── Registration ─────────────────────────────────────────────────────────────
 
 // RegisterTorrentRoutes registers the /api/v1/torrents endpoints.
@@ -269,6 +282,38 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 		out := &trackersOutput{}
 		out.Body.Trackers = trackers
 		return out, nil
+	})
+
+	// Add tracker URLs to a torrent. Operators paste from "edit
+	// trackers" textbox; we accept newline-separated URLs and ignore
+	// duplicates inside the engine.
+	huma.Register(api, huma.Operation{
+		OperationID: "add-torrent-trackers",
+		Method:      http.MethodPost,
+		Path:        "/api/v1/torrents/{hash}/trackers",
+		Summary:     "Add tracker URLs to a torrent",
+		Tags:        []string{"Torrents"},
+	}, func(_ context.Context, input *addTrackersInput) (*emptyOutput, error) {
+		if err := session.AddTrackers(input.Hash, input.Body.URLs, input.Body.Tier); err != nil {
+			return nil, huma.Error404NotFound(err.Error())
+		}
+		return &emptyOutput{}, nil
+	})
+
+	// Remove a single tracker URL. Path-style instead of body so curl
+	// clients can hit it without crafting JSON; URL-encode the URL when
+	// it contains query strings (most do).
+	huma.Register(api, huma.Operation{
+		OperationID: "remove-torrent-tracker",
+		Method:      http.MethodDelete,
+		Path:        "/api/v1/torrents/{hash}/trackers",
+		Summary:     "Remove a tracker URL from a torrent",
+		Tags:        []string{"Torrents"},
+	}, func(_ context.Context, input *removeTrackerInput) (*emptyOutput, error) {
+		if err := session.RemoveTracker(input.Hash, input.URL); err != nil {
+			return nil, huma.Error404NotFound(err.Error())
+		}
+		return &emptyOutput{}, nil
 	})
 
 	// Swarm gauges — diagnoses "tracker says N seeders but we connected
