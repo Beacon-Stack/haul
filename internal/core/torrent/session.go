@@ -1626,6 +1626,31 @@ func (s *Session) saveTorrentData(hash string, t *lt.Torrent) {
 	}
 }
 
+// ExportTorrent returns the raw .torrent bytes for the given hash so an
+// operator can re-add it elsewhere. Reads from the torrents.torrent_data
+// column populated at add-time by saveTorrentData.
+//
+// Returns (nil, error) if the hash is unknown OR the torrent_data column
+// is empty (legacy rows from before persistence wiring or before metadata
+// arrived). Caller should distinguish those cases via the error message.
+func (s *Session) ExportTorrent(hash string) ([]byte, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("database not configured")
+	}
+	var data []byte
+	err := s.db.QueryRow(`SELECT torrent_data FROM torrents WHERE info_hash = $1`, hash).Scan(&data)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("torrent not found: %s", hash)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading torrent_data: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("torrent metadata not yet available for %s", hash)
+	}
+	return data, nil
+}
+
 // markCompleted records the completion time.
 func (s *Session) markCompleted(hash string, completedAt time.Time) {
 	if s.db == nil {
