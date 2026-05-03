@@ -8,6 +8,8 @@ import {
   useTorrentPeers,
   useTorrentPieces,
   useTorrentTrackers,
+  useTorrentStall,
+  type StallInfo,
 } from "@/api/torrents";
 import { Pause, Play, Trash2, FileText } from "lucide-react";
 import { toast } from "sonner";
@@ -38,6 +40,109 @@ function formatSpeed(b: number): string {
 // @/lib/torrentStatus. Don't add inline switches — keep this in sync with
 // TorrentList by routing every status read through torrentVisual().
 
+// formatInactive renders inactive_secs as "Xh Ym" (or "Ym" for under an hour,
+// "Xs" for under a minute). Picked over "X minutes ago"-style relative
+// times because the watcher's threshold semantics are absolute (e.g. Level 2
+// fires at exactly 2× stall_timeout).
+function formatInactive(secs: number): string {
+  if (secs < 60) return `${Math.max(0, Math.floor(secs))}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+// Severity per stall level. The colors map to existing CSS variables so
+// theme overrides (web-shared theme.ts) propagate. Level 4 (NoPeersEver)
+// is a distinct category — not just "even more severe" — so it gets its
+// own treatment via accent rather than escalating red.
+function severityStyle(level: number): { color: string; bg: string; border: string } {
+  switch (level) {
+    case 1: return {
+      color: "var(--color-status-paused)", // yellow-amber
+      bg: "color-mix(in srgb, var(--color-status-paused) 12%, transparent)",
+      border: "color-mix(in srgb, var(--color-status-paused) 35%, transparent)",
+    };
+    case 2: return {
+      color: "var(--color-status-stalled)", // orange
+      bg: "color-mix(in srgb, var(--color-status-stalled) 14%, transparent)",
+      border: "color-mix(in srgb, var(--color-status-stalled) 40%, transparent)",
+    };
+    case 3: return {
+      color: "var(--color-status-failed)", // red
+      bg: "color-mix(in srgb, var(--color-status-failed) 14%, transparent)",
+      border: "color-mix(in srgb, var(--color-status-failed) 40%, transparent)",
+    };
+    case 4: return {
+      // NoPeersEver — the "dead-from-the-start" case. Uses the accent color
+      // (Haul's teal) to distinguish from progressive-stall escalation.
+      color: "var(--color-accent)",
+      bg: "color-mix(in srgb, var(--color-accent) 12%, transparent)",
+      border: "color-mix(in srgb, var(--color-accent) 38%, transparent)",
+    };
+    default: return {
+      color: "var(--color-status-stalled)",
+      bg: "color-mix(in srgb, var(--color-status-stalled) 14%, transparent)",
+      border: "color-mix(in srgb, var(--color-status-stalled) 40%, transparent)",
+    };
+  }
+}
+
+function levelLabel(level: number): string {
+  switch (level) {
+    case 1: return "Level 1 — Reannouncing";
+    case 2: return "Level 2 — Forcing DHT";
+    case 3: return "Level 3 — Needs intervention";
+    case 4: return "Stalled — never found peers";
+    default: return "Stalled";
+  }
+}
+
+function reasonLabel(reason: string): string {
+  switch (reason) {
+    case "no_peers_ever":   return "No peers ever connected. Likely a dead tracker or fake hash.";
+    case "no_peers":        return "Had peers earlier; all disconnected.";
+    case "no_seeders":      return "Connected to peers but none has the data we need.";
+    case "no_data_received": return "Connected to peers, no useful pieces arriving.";
+    default:                return reason;
+  }
+}
+
+// StallCallout renders a banner above the facts grid when the watcher has
+// classified the torrent as stalled. Returns null otherwise so the layout
+// is unchanged for healthy torrents. Exported for unit testing.
+export function StallCallout({ stall }: { stall: StallInfo | undefined }) {
+  if (!stall || !stall.stalled) return null;
+  const sev = severityStyle(stall.level);
+  return (
+    <div
+      role="status"
+      aria-label={`Stall classification: ${levelLabel(stall.level)}`}
+      data-stall-level={stall.level}
+      style={{
+        marginBottom: 20,
+        padding: "12px 16px",
+        borderRadius: 8,
+        background: sev.bg,
+        border: `1px solid ${sev.border}`,
+        display: "flex",
+        flexDirection: "column",
+        gap: 4,
+      }}
+    >
+      <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: sev.color }}>
+        {levelLabel(stall.level)}
+      </div>
+      <div style={{ fontSize: 13, color: "var(--color-text-primary)" }}>
+        {reasonLabel(stall.reason)}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
+        Inactive for {formatInactive(stall.inactive_secs)}.
+      </div>
+    </div>
+  );
+}
+
 export default function TorrentDetail() {
   const { hash } = useParams<{ hash: string }>();
   const { data: t, isLoading } = useTorrent(hash ?? "", { detailPage: true });
@@ -45,6 +150,7 @@ export default function TorrentDetail() {
   const { data: peersResp } = useTorrentPeers(hash ?? "");
   const { data: pieces } = useTorrentPieces(hash ?? "");
   const { data: trackersResp } = useTorrentTrackers(hash ?? "");
+  const { data: stall } = useTorrentStall(hash ?? "");
   const pause = usePauseTorrent();
   const resume = useResumeTorrent();
   const del = useDeleteTorrent();
@@ -147,6 +253,13 @@ export default function TorrentDetail() {
           <div style={{ width: `${Math.min(t.progress * 100, 100)}%`, height: "100%", borderRadius: 3, background: visual.color, transition: "width 0.3s" }} />
         </div>
       </div>
+
+      {/* Stall callout — only renders when the watcher has classified the
+          torrent as stalled. The Status field in the facts grid below
+          already reflects the same color via torrentVisual; this banner
+          adds the level + reason + inactive duration that the dashboard
+          row can't fit. */}
+      <StallCallout stall={stall} />
 
       {/* Facts grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginBottom: 28 }}>

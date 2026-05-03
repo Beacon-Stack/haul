@@ -102,6 +102,45 @@ export function useTorrentFiles(hash: string) {
   });
 }
 
+// ── Stall classification ────────────────────────────────────────────────────
+// StallInfo mirrors internal/core/torrent/stall.go's StallInfo. Read by the
+// detail page via /api/v1/torrents/{hash}/stall to surface the watcher's
+// classification (level + reason + how-long-inactive). When stalled is false
+// the rest of the fields aren't meaningful — the callout suppresses itself.
+
+// StallLevel matches the Go enum.
+//  0 = StallNone        — not classified as stalled
+//  1 = StallLevel1      — no activity for stall_timeout (reannounce)
+//  2 = StallLevel2      — no activity for 2× stall_timeout (force DHT)
+//  3 = StallLevel3      — no activity for 5× stall_timeout (notify ecosystem)
+//  4 = StallNoPeersEver — never observed a peer past firstPeerTimeout
+export type StallLevel = 0 | 1 | 2 | 3 | 4;
+
+// StallReason matches the Go reason constants. Keep in sync with stall.go.
+export type StallReason =
+  | "no_peers_ever"
+  | "no_peers"
+  | "no_seeders"
+  | "no_data_received";
+
+export interface StallInfo {
+  stalled: boolean;
+  level: StallLevel;
+  inactive_secs: number;
+  last_activity?: string; // ISO-8601, optional (omitted when never)
+  reason: StallReason | "";
+}
+
+export function useTorrentStall(hash: string) {
+  return useQuery({
+    queryKey: ["torrents", hash, "stall"],
+    queryFn: () => apiFetch<StallInfo>(`/torrents/${hash}/stall`),
+    enabled: !!hash,
+    refetchInterval: 5000, // slower than the row poll — classification only
+                           // changes on stall_timeout boundaries (≥120s).
+  });
+}
+
 // ── Detail-page hooks ────────────────────────────────────────────────────────
 // All three poll at the detail-page cadence (1s) except trackers, which is
 // static data from the metainfo — refetch rarely.

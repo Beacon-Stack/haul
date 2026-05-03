@@ -57,11 +57,36 @@ func TestClassifyStalled(t *testing.T) {
 		}
 	})
 
-	t.Run("PreMetadataNeverStalled", func(t *testing.T) {
+	t.Run("PreMetadata_StallsWhenNoPeersEverPastFirstPeerTimeout", func(t *testing.T) {
+		// REGRESSION GUARD: a fake or dead-tracker magnet sits forever
+		// without metadata. Previously classifyStalled bailed on hasInfo==false
+		// and the dashboard's Stalled pill silently undercounted (while
+		// /api/v1/stalls correctly reported the torrent as stalled). Now both
+		// surfaces agree. If you find yourself making this test pass by
+		// adding `if !hasInfo { return false }` back, you are reintroducing
+		// the divergence between Info.Stalled and ListStalled — please don't.
 		p := base
 		p.hasInfo = false
+		p.bytesMissing = 0 // pre-metadata: size unknown, anacrolix returns 0
+		// Default base has firstPeerAt=nil, addedAt=wayBack (1h ago) which is
+		// past the 3min firstPeerTimeout — so rule 4 should fire.
+		if !classifyStalled(p) {
+			t.Fatal("REGRESSION: pre-metadata torrent past firstPeerTimeout with no peers " +
+				"was reported NOT stalled. Dashboard Stalled pill will silently undercount " +
+				"these — exactly the no-peers-ever case the multi-level stall classifier " +
+				"is supposed to surface. See classify_stalled_test.go.")
+		}
+	})
+
+	t.Run("PreMetadata_NotStalledInsideFirstPeerWindow", func(t *testing.T) {
+		// Bookend to the regression test above: a freshly-added pre-metadata
+		// torrent that hasn't had time to find peers yet is NOT stalled.
+		p := base
+		p.hasInfo = false
+		p.bytesMissing = 0
+		p.addedAt = justStarted // 30s ago, well inside firstPeerTimeout
 		if classifyStalled(p) {
-			t.Error("pre-metadata torrent was stalled; should be unclassified until metadata arrives")
+			t.Error("pre-metadata torrent within firstPeerTimeout window was reported stalled; should wait for the window to elapse")
 		}
 	})
 

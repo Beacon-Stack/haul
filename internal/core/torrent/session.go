@@ -1335,11 +1335,14 @@ type stallParams struct {
 // Rules (in order):
 //  1. Non-downloading torrents are never stalled (seeding, paused, completed,
 //     etc. — the stalled state only makes sense while trying to make progress).
-//  2. Pre-metadata torrents are never stalled (hasInfo == false). CheckStalls
-//     has a separate "no peers ever" path for pre-metadata, but for the Info
-//     API we just report them as downloading until metadata arrives.
-//  3. Fully-downloaded torrents (bytesMissing == 0) are never stalled.
-//  4. **Session-startup grace**: during the first sessionStartupGrace window
+//  2. Fully-downloaded torrents are never stalled (hasInfo && bytesMissing == 0).
+//     Pre-metadata torrents have bytesMissing == 0 because we don't know the
+//     total yet — that is NOT a reason to skip stall classification. The
+//     "no peers ever" path (rule 5) is exactly the case where a fake or
+//     dead-tracker magnet sits forever without metadata; reporting those
+//     as Downloading would undercount the dashboard's Stalled pill and
+//     diverge from /api/v1/stalls. Both consumers now see the same answer.
+//  3. **Session-startup grace**: during the first sessionStartupGrace window
 //     after the Session was created, never report stalled. This is the fix
 //     for the "everything is red after a container restart" false positive —
 //     on restart, firstPeerAt is nil and lastActivityAt is zero (in-memory
@@ -1347,28 +1350,36 @@ type stallParams struct {
 //     (possibly hours ago). Without the grace, every restored torrent looks
 //     stalled for a minute or two until peers reconnect. CheckStalls and
 //     ListStalled both honor this guard; so must we.
-//  5. "No peers ever" path: if we've never observed a peer AND the torrent
-//     has been around longer than firstPeerTimeout, call it stalled.
-//  6. "No recent activity" path: if lastActivityAt is older than
+//  4. "No peers ever" path: if we've never observed a peer AND the torrent
+//     has been around longer than firstPeerTimeout, call it stalled. Works
+//     pre-metadata since it only consults addedAt and firstPeerAt.
+//  5. "No recent activity" path: if lastActivityAt is older than
 //     stallTimeout, call it stalled. Use addedAt (or firstPeerAt if later)
 //     as the baseline when lastActivityAt is zero — matches GetStallInfo.
 func classifyStalled(p stallParams) bool {
-	// Rules 1–3: non-downloading / pre-metadata / complete.
-	if p.status != StatusDownloading || !p.hasInfo || p.bytesMissing <= 0 {
+	// Rule 1: non-downloading torrents are never stalled.
+	if p.status != StatusDownloading {
 		return false
 	}
 
-	// Rule 4: session-startup grace.
+	// Rule 2: fully-downloaded torrents are never stalled. Skipped for
+	// pre-metadata (hasInfo == false) — bytesMissing is 0 then because we
+	// don't know the size yet, not because anything's complete.
+	if p.hasInfo && p.bytesMissing <= 0 {
+		return false
+	}
+
+	// Rule 3: session-startup grace.
 	if p.now.Sub(p.sessionStartedAt) < sessionStartupGrace {
 		return false
 	}
 
-	// Rule 5: no peers ever observed, past the first-peer window.
+	// Rule 4: no peers ever observed, past the first-peer window.
 	if p.firstPeerAt == nil && p.now.Sub(p.addedAt) > firstPeerTimeout {
 		return true
 	}
 
-	// Rule 6: no recent data activity.
+	// Rule 5: no recent data activity.
 	lastActivity := p.lastActivityAt
 	if lastActivity.IsZero() {
 		lastActivity = p.addedAt
