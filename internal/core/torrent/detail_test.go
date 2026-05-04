@@ -79,10 +79,7 @@ func addTestTorrent(t *testing.T, s *Session, trackers [][]string) (hash string,
 	// Give the session loop one tick to mark the torrent ready.
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		s.mu.RLock()
-		ready := mt.ready
-		s.mu.RUnlock()
-		if ready {
+		if mt.ready.Load() {
 			break
 		}
 		time.Sleep(20 * time.Millisecond)

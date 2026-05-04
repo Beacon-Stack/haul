@@ -94,7 +94,6 @@ func (s *Session) AddNoPeersTorrentForTesting(seed string, addedAt time.Time) st
 	s.mu.Lock()
 	s.torrents[hashHex] = &managedTorrent{
 		addedAt:  addedAt,
-		ready:    false,
 		savePath: s.cfg.DownloadDir,
 	}
 	s.mu.Unlock()
@@ -169,12 +168,12 @@ func (s *Session) CheckStalls(ctx context.Context) {
 
 		// ── Class 1: no peers ever ─────────────────────────────────────
 		// This is the primary dead-torrent signal. It works for both
-		// metadata-less magnets (mt.ready == false, BytesMissing == 0)
+		// metadata-less magnets (mt.ready.Load() == false, BytesMissing == 0)
 		// AND for .torrent files that arrived but found no peers.
 		if mt.firstPeerAt == nil && now.Sub(mt.addedAt) > firstPeerTimeout {
 			ageSecs := int64(now.Sub(mt.addedAt).Seconds())
 			s.logger.Warn("stall: no peers ever observed, classifying as dead",
-				"hash", hash, "age_secs", ageSecs, "ready", mt.ready)
+				"hash", hash, "age_secs", ageSecs, "ready", mt.ready.Load())
 
 			s.bus.Publish(ctx, events.Event{
 				Type:     events.TypeTorrentStalled,
@@ -186,7 +185,7 @@ func (s *Session) CheckStalls(ctx context.Context) {
 					"level":         int(StallNoPeersEver),
 					"peers":         0,
 					"seeders":       0,
-					"ready":         mt.ready,
+					"ready":         mt.ready.Load(),
 					"archived":      false,
 				},
 			})
@@ -200,7 +199,7 @@ func (s *Session) CheckStalls(ctx context.Context) {
 		// ── Class 2: activity-based escalation (needs metadata) ────────
 		// Everything below here requires the torrent to have metadata,
 		// because it relies on BytesMissing() and bytes-received progress.
-		if !mt.ready || mt.t.BytesMissing() == 0 {
+		if !mt.ready.Load() || mt.t.BytesMissing() == 0 {
 			continue
 		}
 
@@ -341,7 +340,7 @@ func (s *Session) GetStallInfo(hash string) (*StallInfo, error) {
 	}
 
 	// Pre-activity / pre-metadata with no stall yet.
-	if !mt.ready || mt.t.BytesMissing() == 0 {
+	if !mt.ready.Load() || mt.t.BytesMissing() == 0 {
 		return &StallInfo{Stalled: false}, nil
 	}
 
@@ -444,7 +443,7 @@ func (s *Session) ListStalled() []StalledTorrent {
 		}
 
 		// Activity-based: require metadata and at least one undownloaded piece.
-		if !mt.ready || mt.t.BytesMissing() == 0 {
+		if !mt.ready.Load() || mt.t.BytesMissing() == 0 {
 			continue
 		}
 		lastActivity := mt.lastActivityAt

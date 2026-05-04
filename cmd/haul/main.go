@@ -24,6 +24,9 @@ import (
 	"github.com/beacon-stack/haul/internal/pulse"
 	"github.com/beacon-stack/haul/internal/version"
 	"github.com/beacon-stack/haul/web"
+	beaconlog "github.com/beacon-stack/pulse/pkg/log"
+	"github.com/beacon-stack/pulse/pkg/log/plugins/file"
+	"github.com/beacon-stack/pulse/pkg/log/plugins/loki"
 )
 
 // sessionAdminAdapter adapts the torrent.Session to the narrow surface
@@ -53,25 +56,44 @@ func main() {
 	}
 
 	// ── Logger ────────────────────────────────────────────────────────────
-	var handler slog.Handler
-	opts := &slog.HandlerOptions{}
-	switch cfg.Log.Level {
-	case "debug":
-		opts.Level = slog.LevelDebug
-	case "warn":
-		opts.Level = slog.LevelWarn
-	case "error":
-		opts.Level = slog.LevelError
-	default:
-		opts.Level = slog.LevelInfo
-	}
+	// Shared module from pulse/pkg/log — gives us stdout JSON, a ring
+	// buffer behind /api/v1/system/logs, and pluggable sinks (Loki,
+	// file, etc.) via env vars. Stdout is always on; plugins are
+	// opt-in. SetDefault so libraries that grab slog.Default see
+	// the configured handler too.
+	logger, logSystem := beaconlog.New(beaconlog.Config{
+		Service: "haul",
+		Level:   cfg.Log.Level,
+		Format:  cfg.Log.Format,
+	})
+	slog.SetDefault(logger)
+	defer logSystem.Close(context.Background())
 
-	if cfg.Log.Format == "text" {
-		handler = slog.NewTextHandler(os.Stdout, opts)
-	} else {
-		handler = slog.NewJSONHandler(os.Stdout, opts)
+	if url := os.Getenv("BEACON_LOG_LOKI_URL"); url != "" {
+		p, err := loki.New(loki.Config{
+			Service:   "haul",
+			URL:       url,
+			TenantID:  os.Getenv("BEACON_LOG_LOKI_TENANT"),
+			BasicUser: os.Getenv("BEACON_LOG_LOKI_USER"),
+			BasicPass: os.Getenv("BEACON_LOG_LOKI_PASS"),
+		})
+		if err != nil {
+			logger.Warn("loki plugin disabled", "error", err)
+		} else {
+			logSystem.Add(p)
+			logger.Info("log sink: loki", "url", url)
+		}
 	}
-	logger := slog.New(handler)
+	if path := os.Getenv("BEACON_LOG_FILE_PATH"); path != "" {
+		p, err := file.New(file.Config{Path: path})
+		if err != nil {
+			logger.Warn("file log plugin disabled", "error", err)
+		} else {
+			logSystem.Add(p)
+			logger.Info("log sink: file", "path", path)
+		}
+	}
+	dockerLogs := beaconlog.NewDockerLogsReader()
 
 	logger.Info(version.AppName+" starting",
 		"version", version.Version,
@@ -271,6 +293,8 @@ func main() {
 		DB:         database.SQL,
 		Admin:      adminGate,
 		Pulse:      pulseIntegration,
+		LogSystem:  logSystem,
+		DockerLogs: dockerLogs,
 	})
 
 	// Mount the embedded web UI as a catch-all.

@@ -170,7 +170,7 @@ func TestPause_ClearsQueuePausedFlag(t *testing.T) {
 
 	// Inject a managed torrent already in queue-paused state.
 	hash := "deadbeef"
-	mt := &managedTorrent{paused: true, queuePaused: true, ready: false}
+	mt := &managedTorrent{paused: true, queuePaused: true}
 	session.mu.Lock()
 	session.torrents[hash] = mt
 	session.mu.Unlock()
@@ -200,7 +200,7 @@ func TestResume_ClearsQueuePausedFlag(t *testing.T) {
 	session := newTestSession(t)
 
 	hash := "feedface"
-	mt := &managedTorrent{paused: true, queuePaused: true, ready: false}
+	mt := &managedTorrent{paused: true, queuePaused: true}
 	session.mu.Lock()
 	session.torrents[hash] = mt
 	session.mu.Unlock()

@@ -79,7 +79,6 @@ func TestCheckStalls_NoPeersEver_FiresAfterTimeout(t *testing.T) {
 	session.torrents[randomHash.HexString()] = &managedTorrent{
 		t:       tHandle,
 		addedAt: time.Now().Add(-1 * time.Second), // already 1s old at test start
-		ready:   false,
 	}
 	session.mu.Unlock()
 
@@ -157,7 +156,6 @@ func TestCheckStalls_SessionStartupGrace(t *testing.T) {
 	session.torrents[randomHash.HexString()] = &managedTorrent{
 		t:       tHandle,
 		addedAt: time.Now().Add(-1 * time.Minute), // pretend it's been sitting for a minute
-		ready:   false,
 	}
 	session.mu.Unlock()
 
@@ -220,7 +218,6 @@ func TestListStalled_ReturnsNoPeersEverTorrents(t *testing.T) {
 	session.torrents[randomHash.HexString()] = &managedTorrent{
 		t:       tHandle,
 		addedAt: time.Now(),
-		ready:   false,
 	}
 	session.mu.Unlock()
 
@@ -283,7 +280,6 @@ func TestListStalled_SkipsGracePeriod(t *testing.T) {
 	session.torrents[randomHash.HexString()] = &managedTorrent{
 		t:       tHandle,
 		addedAt: time.Now().Add(-1 * time.Minute),
-		ready:   false,
 	}
 	session.mu.Unlock()
 
@@ -335,7 +331,6 @@ func TestFirstPeerAt_NilUntilFirstPeer(t *testing.T) {
 	session.torrents[randomHash.HexString()] = &managedTorrent{
 		t:       tHandle,
 		addedAt: time.Now(),
-		ready:   false,
 	}
 	session.mu.Unlock()
 
@@ -531,7 +526,6 @@ func TestGetStallInfo_NoPeersEverPath(t *testing.T) {
 	session.torrents[randomHash.HexString()] = &managedTorrent{
 		t:       tHandle,
 		addedAt: time.Now().Add(-1 * time.Second), // already past timeout
-		ready:   false,
 	}
 	session.mu.Unlock()
 
@@ -578,7 +572,6 @@ func TestGetStallInfo_PreMetadataWithinTimeoutNotStalled(t *testing.T) {
 	session.torrents[randomHash.HexString()] = &managedTorrent{
 		t:       tHandle,
 		addedAt: time.Now(), // just added
-		ready:   false,
 	}
 	session.mu.Unlock()
 

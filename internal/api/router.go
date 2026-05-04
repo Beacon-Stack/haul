@@ -20,6 +20,7 @@ import (
 	adminpkg "github.com/beacon-stack/haul/internal/db/admin"
 	"github.com/beacon-stack/haul/internal/pulse"
 	"github.com/beacon-stack/haul/internal/version"
+	beaconlog "github.com/beacon-stack/pulse/pkg/log"
 )
 
 // sanitizeFilename strips characters that would confuse filesystems or
@@ -53,6 +54,12 @@ type RouterConfig struct {
 	// services for the Activity page deep-links. Nil when Haul is
 	// running standalone — the peers endpoint then returns an empty map.
 	Pulse *pulse.Integration
+	// LogSystem + DockerLogs come from pulse/pkg/log. When LogSystem
+	// is non-nil, /api/v1/system/{logs,log-level} are registered.
+	// When DockerLogs is also non-nil, /api/v1/system/logs/docker
+	// is registered for full-history access.
+	LogSystem  *beaconlog.System
+	DockerLogs *beaconlog.DockerLogsReader
 }
 
 // AdminGate is the runtime knob for the admin-only endpoints. Held by
@@ -117,6 +124,10 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	v1.RegisterActivityRoutes(humaAPI, cfg.DB)
 	v1.RegisterPeerRoutes(humaAPI, cfg.Pulse)
 	v1.RegisterResearchRoutes(humaAPI, cfg.Session, cfg.Pulse)
+
+	if cfg.LogSystem != nil {
+		beaconlog.RegisterRoutesWithDocker(humaAPI, cfg.LogSystem, cfg.DockerLogs)
+	}
 	v1.RegisterCategoryRoutes(humaAPI, cfg.Categories)
 	v1.RegisterTagRoutes(humaAPI, cfg.Tags)
 	v1.RegisterStatsRoutes(humaAPI, cfg.Session)
