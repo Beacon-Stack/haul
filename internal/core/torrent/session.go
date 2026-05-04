@@ -94,6 +94,7 @@ type Info struct {
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 	ContentPath  string    `json:"content_path"`
 	Sequential   bool      `json:"sequential"`
+	Requester    string    `json:"requester,omitempty"` // "pilot" | "prism" | "manual" | ""
 
 	// Stalled is true when the backend's stall detector classifies this
 	// torrent as inactive — see internal/core/torrent/stall.go for the
@@ -102,6 +103,14 @@ type Info struct {
 	// frontend-side heuristic which flipped on every brief connection blip.
 	// Always false for non-downloading statuses.
 	Stalled bool `json:"stalled"`
+
+	// StalledAt is non-nil when the stall watcher escalated past level 3
+	// and auto-paused the torrent. Distinct from Stalled (which is
+	// transient and only meaningful while downloading): once StalledAt
+	// is set, the torrent is permanently marked as needing user
+	// attention until they resume it. Resume clears StalledAt and
+	// removes the auto-applied 'stalled' tag.
+	StalledAt *time.Time `json:"stalled_at,omitempty"`
 }
 
 // PeerInfo is the external representation of a single connected peer.
@@ -243,13 +252,26 @@ type managedTorrent struct {
 	// until the user explicitly resumes them.
 	queuePaused bool
 	category    string
+	// requester records which Beacon service requested this torrent
+	// ("pilot", "prism", "manual", or ""). Set by SetMetadata and on
+	// restore from DB. Surfaced on Info so the UI can gate features
+	// like "Re-search via Pilot" without a separate API call.
+	requester string
 	tags           []string
 	addedAt        time.Time
 	savePath       string
 	lastBytesRead  int64      // for stall detection
 	lastActivityAt time.Time  // last time data was received (bytesRead increased)
 	firstPeerAt    *time.Time // first time we observed ActivePeers > 0 (nil = never)
-	ready          bool       // true once GotInfo() has fired
+	// stalledAt marks the moment the stall watcher escalated this
+	// torrent past level 3 and auto-paused it. Non-nil ⇒ the torrent
+	// needs user attention; the UI surfaces this as a red badge + a
+	// dashboard "Needs attention" rail. Distinct from the transient
+	// classifyStalled() flag (which is recomputed every getInfo call
+	// while a torrent is downloading): stalledAt persists until the
+	// user explicitly resumes the torrent.
+	stalledAt *time.Time
+	ready     bool // true once GotInfo() has fired
 
 	// Rate trackers convert anacrolix's cumulative byte counters into
 	// smoothed bytes-per-second values by sampling on every getInfo call.
@@ -1040,7 +1062,26 @@ func (s *Session) Resume(hash string) error {
 	}
 	mt.paused = false
 	mt.queuePaused = false
+	// Resuming clears any "auto-stalled" state — the user is taking
+	// responsibility, so the torrent comes off the dashboard's "needs
+	// attention" rail and the auto-applied tag comes off the row. If
+	// peers stay zero, the stall watcher will re-apply both on its
+	// next escalation.
+	wasStalled := mt.stalledAt != nil
+	mt.stalledAt = nil
+	if wasStalled {
+		mt.tags = removeString(mt.tags, "stalled")
+	}
 	s.mu.Unlock()
+
+	if wasStalled && s.db != nil {
+		if _, err := s.db.Exec(`UPDATE torrents SET stalled_at = NULL WHERE info_hash = $1`, hash); err != nil {
+			s.logger.Warn("resume: clear stalled_at failed", "hash", hash, "error", err)
+		}
+		if _, err := s.db.Exec(`DELETE FROM torrent_tags WHERE info_hash = $1 AND tag = 'stalled'`, hash); err != nil {
+			s.logger.Warn("resume: drop stalled tag failed", "hash", hash, "error", err)
+		}
+	}
 
 	if mt.t != nil {
 		mt.t.DownloadAll()
@@ -1362,29 +1403,36 @@ func (s *Session) torrentInfo(hash string, mt *managedTorrent) (result *Info) {
 		if r := recover(); r != nil {
 			s.logger.Warn("torrentInfo panic recovered", "hash", hash, "panic", r)
 			result = &Info{
-				InfoHash: hash,
-				Name:     hash,
-				Status:   StatusDownloading,
-				SavePath: mt.savePath,
-				Category: mt.category,
-				Tags:     mt.tags,
-				AddedAt:  mt.addedAt,
+				InfoHash:  hash,
+				Name:      hash,
+				Status:    StatusDownloading,
+				SavePath:  mt.savePath,
+				Category:  mt.category,
+				Tags:      mt.tags,
+				AddedAt:   mt.addedAt,
+				StalledAt: mt.stalledAt,
+				Requester: mt.requester,
 			}
 		}
 	}()
 
 	t := mt.t
 
-	// If metadata hasn't arrived yet, return minimal info.
+	// If metadata hasn't arrived yet, return minimal info. StalledAt
+	// still surfaces here — a torrent can in theory be marked stalled
+	// even pre-metadata (manual restore from DB), and the UI must
+	// keep showing the badge.
 	if !mt.ready {
 		return &Info{
-			InfoHash: hash,
-			Name:     t.Name(),
-			Status:   StatusDownloading,
-			SavePath: mt.savePath,
-			Category: mt.category,
-			Tags:     mt.tags,
-			AddedAt:  mt.addedAt,
+			InfoHash:  hash,
+			Name:      t.Name(),
+			Status:    StatusDownloading,
+			SavePath:  mt.savePath,
+			Category:  mt.category,
+			Tags:      mt.tags,
+			AddedAt:   mt.addedAt,
+			StalledAt: mt.stalledAt,
+			Requester: mt.requester,
 		}
 	}
 
@@ -1508,6 +1556,8 @@ func (s *Session) torrentInfo(hash string, mt *managedTorrent) (result *Info) {
 		AddedAt:      mt.addedAt,
 		ContentPath:  contentPath,
 		Stalled:      stalled,
+		StalledAt:    mt.stalledAt,
+		Requester:    mt.requester,
 	}
 }
 
@@ -1726,16 +1776,17 @@ func (s *Session) persistTorrent(hash string, mt *managedTorrent) {
 	// monitorCompletion, and the requester_* fields come in via
 	// SetMetadata (separate write path).
 	_, err := s.db.Exec(`
-		INSERT INTO torrents (info_hash, name, save_path, category, added_at, sequential)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO torrents (info_hash, name, save_path, category, added_at, sequential, resolution)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		ON CONFLICT (info_hash) DO UPDATE SET
 			name = EXCLUDED.name,
 			save_path = EXCLUDED.save_path,
 			category = EXCLUDED.category,
 			added_at = EXCLUDED.added_at,
 			sequential = EXCLUDED.sequential,
+			resolution = EXCLUDED.resolution,
 			removed_at = NULL`,
-		hash, mt.t.Name(), mt.savePath, mt.category, mt.addedAt, false,
+		hash, mt.t.Name(), mt.savePath, mt.category, mt.addedAt, false, parseResolution(mt.t.Name()),
 	)
 	if err != nil {
 		s.logger.Error("failed to persist torrent", "hash", hash, "error", err)
@@ -1752,7 +1803,7 @@ func (s *Session) updateTorrentMeta(hash, name string, size int64) {
 	if s.db == nil {
 		return
 	}
-	_, err := s.db.Exec(`UPDATE torrents SET name = $1, size_bytes = $2 WHERE info_hash = $3`, name, size, hash)
+	_, err := s.db.Exec(`UPDATE torrents SET name = $1, size_bytes = $2, resolution = $3 WHERE info_hash = $4`, name, size, parseResolution(name), hash)
 	if err != nil {
 		s.logger.Error("failed to update torrent meta", "hash", hash, "error", err)
 	}
@@ -1841,7 +1892,7 @@ func (s *Session) restoreFromDB() error {
 	if s.db == nil {
 		return nil
 	}
-	rows, err := s.db.Query(`SELECT info_hash, name, save_path, category, added_at, torrent_data, completed_at FROM torrents`)
+	rows, err := s.db.Query(`SELECT info_hash, name, save_path, category, added_at, torrent_data, completed_at, stalled_at, requester_service FROM torrents`)
 	if err != nil {
 		return fmt.Errorf("querying torrents: %w", err)
 	}
@@ -1849,11 +1900,11 @@ func (s *Session) restoreFromDB() error {
 
 	var restored, cleaned int
 	for rows.Next() {
-		var hash, name, savePath, category string
+		var hash, name, savePath, category, requester string
 		var addedAt time.Time
 		var torrentData []byte
-		var completedAt *time.Time
-		if err := rows.Scan(&hash, &name, &savePath, &category, &addedAt, &torrentData, &completedAt); err != nil {
+		var completedAt, stalledAt *time.Time
+		if err := rows.Scan(&hash, &name, &savePath, &category, &addedAt, &torrentData, &completedAt, &stalledAt, &requester); err != nil {
 			s.logger.Warn("skipping torrent row", "error", err)
 			continue
 		}
@@ -1891,13 +1942,33 @@ func (s *Session) restoreFromDB() error {
 
 		t.AddTrackers(DefaultPublicTrackers)
 
+		// A torrent that was auto-paused by the stall watcher before
+		// restart comes back paused so the user keeps seeing it on
+		// the "needs attention" rail. tags are loaded from the
+		// torrent_tags table below to preserve the auto-applied
+		// 'stalled' tag (and any user-applied tags).
+		isStalled := stalledAt != nil
+
+		var tags []string
+		if rows2, terr := s.db.Query(`SELECT tag FROM torrent_tags WHERE info_hash = $1`, hash); terr == nil {
+			for rows2.Next() {
+				var tag string
+				if scanErr := rows2.Scan(&tag); scanErr == nil {
+					tags = append(tags, tag)
+				}
+			}
+			rows2.Close()
+		}
+
 		mt := &managedTorrent{
-			t:        t,
-			paused:   false,
-			category: category,
-			savePath: savePath,
-			tags:     nil,
-			addedAt:  addedAt,
+			t:         t,
+			paused:    isStalled,
+			category:  category,
+			savePath:  savePath,
+			tags:      tags,
+			addedAt:   addedAt,
+			stalledAt: stalledAt,
+			requester: requester,
 		}
 
 		s.mu.Lock()
@@ -1909,7 +1980,7 @@ func (s *Session) restoreFromDB() error {
 		// bolt completion store. Protects against the "everything
 		// restarts from 0% after a restart" class of bugs where bolt
 		// state gets out of sync with the file on disk.
-		go s.waitAndStart(mt, hash, false, false, true)
+		go s.waitAndStart(mt, hash, isStalled, false, true)
 		restored++
 		s.logger.Info("restored torrent", "hash", hash, "name", name)
 	}

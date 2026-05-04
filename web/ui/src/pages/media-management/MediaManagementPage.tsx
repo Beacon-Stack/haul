@@ -1,5 +1,7 @@
 import { useState, useEffect } from "react";
+import { Info } from "lucide-react";
 import { useSettings, useSaveSettings, type SettingsMap } from "@/api/settings";
+import { usePeerServices } from "@/api/activity";
 import { toast } from "sonner";
 
 // ── Shared styles ─────────────────────────────────────────────────────────
@@ -23,8 +25,8 @@ function onInputBlur(e: React.FocusEvent<HTMLInputElement | HTMLSelectElement>) 
   e.currentTarget.style.borderColor = "var(--color-border-default)";
 }
 
-function ToggleRow({ label, description, checked, onChange }: {
-  label: string; description: string; checked: boolean; onChange: (v: boolean) => void;
+function ToggleRow({ label, description, checked, onChange, disabled }: {
+  label: string; description: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean;
 }) {
   return (
     <div style={{
@@ -34,6 +36,7 @@ function ToggleRow({ label, description, checked, onChange }: {
       gap: 16,
       paddingBottom: 16,
       borderBottom: "1px solid var(--color-border-subtle)",
+      opacity: disabled ? 0.5 : 1,
     }}>
       <div>
         <span style={{ display: "block", fontSize: 13, fontWeight: 500, color: "var(--color-text-primary)", marginBottom: 2 }}>
@@ -44,14 +47,16 @@ function ToggleRow({ label, description, checked, onChange }: {
       <button
         role="switch"
         aria-checked={checked}
-        onClick={() => onChange(!checked)}
+        aria-disabled={disabled}
+        disabled={disabled}
+        onClick={() => !disabled && onChange(!checked)}
         style={{
           width: 40,
           height: 22,
           borderRadius: 11,
           border: "none",
           background: checked ? "var(--color-accent)" : "var(--color-bg-subtle)",
-          cursor: "pointer",
+          cursor: disabled ? "not-allowed" : "pointer",
           position: "relative",
           flexShrink: 0,
           transition: "background 150ms ease",
@@ -131,8 +136,18 @@ function FormatPreview({ format, type }: { format: string; type: "episode" | "mo
 export default function MediaManagementPage() {
   const { data: savedSettings } = useSettings();
   const saveSettings = useSaveSettings();
+  const { data: peers } = usePeerServices();
   const [form, setForm] = useState<SettingsMap>({});
   const [dirty, setDirty] = useState(false);
+
+  // When Pulse reports a Pilot or Prism peer, those services own the
+  // rename step as part of their import pipeline. Letting Haul also
+  // rename means the file's name changes underneath the arr's
+  // importer, which then can't find it. Detect and disable.
+  const pilotConnected = !!peers?.["pilot"];
+  const prismConnected = !!peers?.["prism"];
+  const arrConnected = pilotConnected || prismConnected;
+  const arrNames = [pilotConnected && "Pilot", prismConnected && "Prism"].filter(Boolean).join(" and ");
 
   useEffect(() => {
     if (savedSettings) {
@@ -168,6 +183,12 @@ export default function MediaManagementPage() {
 
   const episodeFormat = getStr("episode_format", "{Series Title} - S{Season:00}E{Episode:00} - {Episode Title} {Quality Full}");
   const movieFormat = getStr("movie_format", "{Movie Title} ({Release Year}) {Quality Full}");
+
+  // The downstream Episode / Movie / Colon cards are only meaningful
+  // when Haul will actually rename. With an arr connected, even if
+  // the toggle is on (legacy setting) the rename never fires — so
+  // grey the cards out the same way we do when the toggle is off.
+  const renameActive = getBool("rename_on_complete") && !arrConnected;
 
   return (
     <div style={{ padding: 24, maxWidth: 800, margin: "0 auto" }}>
@@ -208,15 +229,44 @@ export default function MediaManagementPage() {
           borderRadius: 10,
           padding: 20,
         }}>
+          {arrConnected && (
+            <div style={{
+              display: "flex",
+              gap: 10,
+              padding: "10px 12px",
+              marginBottom: 16,
+              background: "color-mix(in srgb, var(--color-accent) 8%, transparent)",
+              border: "1px solid color-mix(in srgb, var(--color-accent) 25%, transparent)",
+              borderRadius: 6,
+              fontSize: 12,
+              color: "var(--color-text-secondary)",
+              lineHeight: 1.5,
+            }}>
+              <Info size={14} style={{ color: "var(--color-accent)", flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <strong style={{ color: "var(--color-text-primary)" }}>Renaming is handled by {arrNames}.</strong>
+                {" "}When Haul is connected to a manager service, that service organises and renames imported files using its own format settings. Letting Haul also rename would change the filename out from under the importer mid-flight, so this setting is disabled.
+                {" "}To configure naming, open {arrNames}'s Media Management settings.
+              </div>
+            </div>
+          )}
+
           <ToggleRow
             label="Rename on complete"
-            description="Automatically rename downloaded files when media metadata is available from Pilot or Prism."
-            checked={getBool("rename_on_complete")}
+            description="When a torrent finishes, rename its files using the formats below before the file is handed off. Only useful in standalone mode — Haul needs metadata (title, year, season/episode) to rename, and that metadata only arrives when a manager service stamps it on the torrent."
+            checked={getBool("rename_on_complete") && !arrConnected}
             onChange={(v) => set("rename_on_complete", String(v))}
+            disabled={arrConnected}
           />
-          {!getBool("rename_on_complete") && (
+
+          {!arrConnected && !getBool("rename_on_complete") && (
             <p style={{ margin: "8px 0 0", fontSize: 12, color: "var(--color-text-muted)" }}>
-              When disabled, files keep the original torrent naming.
+              When disabled, files keep their original torrent naming.
+            </p>
+          )}
+          {!arrConnected && (
+            <p style={{ margin: "10px 0 0", fontSize: 11, color: "var(--color-text-muted)", lineHeight: 1.5 }}>
+              Tokens like <code style={{ fontFamily: "var(--font-family-mono)" }}>{"{Series Title}"}</code> and <code style={{ fontFamily: "var(--font-family-mono)" }}>{"{Quality Full}"}</code> are filled in from per-torrent metadata. Without that metadata (e.g. a magnet link added directly), the rename is a no-op and the file keeps its torrent name.
             </p>
           )}
         </div>
@@ -227,8 +277,8 @@ export default function MediaManagementPage() {
           border: "1px solid var(--color-border-subtle)",
           borderRadius: 10,
           overflow: "hidden",
-          opacity: getBool("rename_on_complete") ? 1 : 0.5,
-          pointerEvents: getBool("rename_on_complete") ? "auto" : "none",
+          opacity: renameActive ? 1 : 0.5,
+          pointerEvents: renameActive ? "auto" : "none",
         }}>
           <div style={{
             padding: "14px 20px",
@@ -277,8 +327,8 @@ export default function MediaManagementPage() {
           border: "1px solid var(--color-border-subtle)",
           borderRadius: 10,
           overflow: "hidden",
-          opacity: getBool("rename_on_complete") ? 1 : 0.5,
-          pointerEvents: getBool("rename_on_complete") ? "auto" : "none",
+          opacity: renameActive ? 1 : 0.5,
+          pointerEvents: renameActive ? "auto" : "none",
         }}>
           <div style={{
             padding: "14px 20px",
@@ -317,8 +367,8 @@ export default function MediaManagementPage() {
           border: "1px solid var(--color-border-subtle)",
           borderRadius: 10,
           padding: 20,
-          opacity: getBool("rename_on_complete") ? 1 : 0.5,
-          pointerEvents: getBool("rename_on_complete") ? "auto" : "none",
+          opacity: renameActive ? 1 : 0.5,
+          pointerEvents: renameActive ? "auto" : "none",
         }}>
           <FieldRow label="Colon Replacement" description="How colons in titles are handled for filesystem compatibility.">
             <select value={getStr("colon_replacement", "space-dash")} onChange={(e) => set("colon_replacement", e.target.value)} style={{ ...inputStyle, fontFamily: "inherit" }} onFocus={onInputFocus} onBlur={onInputBlur}>

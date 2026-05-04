@@ -14,6 +14,7 @@ import (
 	"github.com/beacon-stack/haul/internal/api"
 	"github.com/beacon-stack/haul/internal/api/ws"
 	"github.com/beacon-stack/haul/internal/config"
+	"github.com/beacon-stack/haul/internal/core/activity"
 	"github.com/beacon-stack/haul/internal/core/category"
 	"github.com/beacon-stack/haul/internal/core/tag"
 	"github.com/beacon-stack/haul/internal/core/torrent"
@@ -114,6 +115,12 @@ func main() {
 	// ── WebSocket hub ─────────────────────────────────────────────────────
 	wsHub := ws.NewHub(logger)
 	bus.Subscribe(wsHub.HandleEvent)
+
+	// ── Activity history persister ────────────────────────────────────────
+	// Writes lifecycle events to torrent_events so the Activity page can
+	// render history that survives restarts. Filters noisy types
+	// internally; safe to subscribe even when the DB is offline.
+	bus.Subscribe(activity.NewPersister(database.SQL, logger).HandleEvent)
 
 	// ── Torrent session ───────────────────────────────────────────────────
 	session, err := torrent.NewSession(cfg.Torrent, database.SQL, bus, logger)
@@ -263,6 +270,7 @@ func main() {
 		Tags:       tagSvc,
 		DB:         database.SQL,
 		Admin:      adminGate,
+		Pulse:      pulseIntegration,
 	})
 
 	// Mount the embedded web UI as a catch-all.

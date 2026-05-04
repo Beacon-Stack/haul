@@ -5,7 +5,7 @@ import { useSettings, useSaveSettings, type SettingsMap } from "@/api/settings";
 import { toast } from "sonner";
 import {
   Settings, HardDrive, Activity, Wifi, Download, Upload,
-  Zap, Shield, Clock, Terminal, Anchor, Monitor, Moon, Sun, Check,
+  Zap, Shield, Clock, Terminal, Anchor, Monitor, Moon, Sun, Check, ToggleLeft,
 } from "lucide-react";
 import {
   THEME_PRESETS,
@@ -387,6 +387,16 @@ export default function SettingsPage() {
 
         {/* Appearance */}
         <AppearanceSection />
+
+        {/* Optional features — pages that ship hidden until the user opts in. */}
+        <SectionCard title="Features" icon={ToggleLeft}>
+          <ToggleRow
+            label="RSS Feeds"
+            description="Show the RSS Feeds menu and enable feed-driven auto-grabbing. Off by default — most users have Pilot/Prism (or Sonarr/Radarr) handling automation already, so this is for standalone deployments where you want Haul to subscribe to a feed and grab matches itself."
+            checked={getBool("enable_rss_feeds")}
+            onChange={(v) => set("enable_rss_feeds", String(v))}
+          />
+        </SectionCard>
 
         {/* Row 1: Downloads + Speed */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>

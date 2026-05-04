@@ -47,8 +47,13 @@ const VISUALS: Record<TorrentVisualKey, TorrentVisual> = {
 };
 
 // torrentVisual returns the canonical (label, color) for a torrent.
-// The "stalled" override only applies when the backend has flagged it.
-export function torrentVisual(t: Pick<TorrentInfo, "status" | "stalled">): TorrentVisual {
+// "Stalled" wins over both transient downloading-stalls AND auto-paused
+// (stalled_at set) torrents — both render as the same "needs attention"
+// red so the user has a single visual target to look for in a long list.
+export function torrentVisual(t: Pick<TorrentInfo, "status" | "stalled" | "stalled_at">): TorrentVisual {
+  if (t.stalled_at) {
+    return VISUALS.stalled;
+  }
   if (t.status === "downloading" && t.stalled) {
     return VISUALS.stalled;
   }

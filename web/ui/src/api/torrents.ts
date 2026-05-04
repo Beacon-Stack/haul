@@ -28,6 +28,15 @@ export interface TorrentInfo {
   // The frontend renders this as a distinct "Stalled" state; never compute it
   // client-side.
   stalled: boolean;
+  // Set when the stall watcher escalated past level 3 and auto-paused
+  // the torrent. Distinct from `stalled` (which is transient): once
+  // stalled_at is set, the torrent is permanently flagged as needing
+  // attention until the user resumes it. RFC3339 timestamp.
+  stalled_at?: string;
+  // Which Beacon service requested this torrent — "pilot" | "prism"
+  // | "manual" | "" / undefined. UI uses this to gate features like
+  // "Re-search via Pilot" that only make sense for arr-requested grabs.
+  requester?: string;
 }
 
 export interface TorrentFile {
@@ -217,6 +226,106 @@ export function useSetTorrentPriority() {
       apiFetch(`/torrents/${hash}/priority`, {
         method: "PUT",
         body: JSON.stringify({ priority }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents"] }),
+  });
+}
+
+// ── Right-click context-menu actions ─────────────────────────────────────────
+//
+// Backend wiring lives in internal/api/v1/torrent_control.go; these
+// hooks just exist so the menu can call them through the same react-
+// query layer everything else uses (consistent invalidation, retries,
+// error handling).
+
+export function useForceStartTorrent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (hash: string) =>
+      apiFetch(`/torrents/${hash}/force-start`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents"] }),
+  });
+}
+
+export function useRecheckTorrent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (hash: string) =>
+      apiFetch(`/torrents/${hash}/recheck`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents"] }),
+  });
+}
+
+export function useReannounceTorrent() {
+  return useMutation({
+    mutationFn: (hash: string) =>
+      apiFetch(`/torrents/${hash}/reannounce`, { method: "POST" }),
+  });
+}
+
+export function useSetTorrentCategory() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ hash, category }: { hash: string; category: string }) =>
+      apiFetch(`/torrents/${hash}/category`, {
+        method: "PUT",
+        body: JSON.stringify({ category }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents"] }),
+  });
+}
+
+export function useAddTorrentTags() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ hash, tags }: { hash: string; tags: string[] }) =>
+      apiFetch(`/torrents/${hash}/tags`, {
+        method: "POST",
+        body: JSON.stringify({ tags }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents"] }),
+  });
+}
+
+export function useRemoveTorrentTags() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ hash, tags }: { hash: string; tags: string[] }) =>
+      apiFetch(`/torrents/${hash}/tags`, {
+        method: "DELETE",
+        body: JSON.stringify({ tags }),
+      }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents"] }),
+  });
+}
+
+// useResearchTorrent triggers a server-side proxy call to the
+// requesting service (Pilot/Prism) to blocklist the dead release,
+// remove the active torrent from Haul, and grab an alternative.
+// Only meaningful when the torrent has a requester — guarded in the
+// UI rather than the hook.
+export function useResearchTorrent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (hash: string) =>
+      apiFetch<{ result: string; release_title?: string; reason?: string }>(
+        `/torrents/${hash}/research`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["torrents"] });
+      void qc.invalidateQueries({ queryKey: ["activity"] });
+    },
+  });
+}
+
+export function useSetTorrentLocation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ hash, path }: { hash: string; path: string }) =>
+      apiFetch(`/torrents/${hash}/location`, {
+        method: "PUT",
+        body: JSON.stringify({ path }),
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents"] }),
   });

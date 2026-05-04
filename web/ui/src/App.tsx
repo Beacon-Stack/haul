@@ -6,6 +6,7 @@ import Shell from "@/layouts/Shell";
 import TorrentList from "@/pages/torrents/TorrentList";
 import TorrentDetail from "@/pages/torrents/TorrentDetail";
 import ActivityPage from "@/pages/activity/ActivityPage";
+import ActivityDetailPage from "@/pages/activity/ActivityDetailPage";
 import CategoriesPage from "@/pages/categories/CategoriesPage";
 import RSSPage from "@/pages/rss/RSSPage";
 import SettingsPage from "@/pages/settings/SettingsPage";
@@ -27,6 +28,7 @@ export default function App() {
               <Route index element={<TorrentList />} />
               <Route path="torrents/:hash" element={<TorrentDetail />} />
               <Route path="activity" element={<ActivityPage />} />
+              <Route path="activity/:hash" element={<ActivityDetailPage />} />
               <Route path="categories" element={<CategoriesPage />} />
               <Route path="rss" element={<RSSPage />} />
               <Route path="media-management" element={<MediaManagementPage />} />

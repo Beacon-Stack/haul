@@ -255,20 +255,45 @@ func (s *Session) CheckStalls(ctx context.Context) {
 			s.logger.Info("stall level 2: force DHT re-query", "hash", hash, "inactive_secs", inactiveSecs)
 
 		case StallLevel3:
-			s.logger.Warn("stall level 3: archiving stalled torrent", "hash", hash, "inactive_secs", inactiveSecs, "reason", reason)
+			// Auto-pause (not drop): keep the torrent in the engine + the
+			// /api/v1/torrents response so the user can see what's
+			// stranded and decide what to do. Stamp stalledAt + add the
+			// 'stalled' tag so the existing tag-filter UI can group and
+			// surface them. Idempotent: a torrent already past level 3
+			// stays paused without re-firing the bus event every tick.
+			s.mu.Lock()
+			alreadyStalled := mt.stalledAt != nil
+			s.mu.Unlock()
+			if alreadyStalled {
+				continue
+			}
 
-			// Auto-archive: drop from engine entirely to free resources,
-			// update DB category, and remove from in-memory map.
-			mt.t.Drop()
+			s.logger.Warn("stall level 3: pausing stalled torrent", "hash", hash, "inactive_secs", inactiveSecs, "reason", reason)
+
+			if err := s.Pause(hash); err != nil {
+				s.logger.Warn("stall level 3: pause failed", "hash", hash, "error", err)
+			}
+
+			stalledAt := time.Now().UTC()
 			s.mu.Lock()
 			if m, ok := s.torrents[hash]; ok {
-				m.category = "archived"
-				m.paused = true
+				m.stalledAt = &stalledAt
+				// Auto-add the 'stalled' tag if it isn't already present.
+				// The tag is the user-facing label for the dashboard
+				// rail + the existing tag filter chip.
+				if !containsString(m.tags, "stalled") {
+					m.tags = append(m.tags, "stalled")
+				}
 			}
-			delete(s.torrents, hash)
 			s.mu.Unlock()
+
 			if s.db != nil {
-				_, _ = s.db.Exec(`UPDATE torrents SET category = 'archived' WHERE info_hash = $1`, hash)
+				if _, err := s.db.Exec(`UPDATE torrents SET stalled_at = $1 WHERE info_hash = $2`, stalledAt, hash); err != nil {
+					s.logger.Warn("stall level 3: persist stalled_at failed", "hash", hash, "error", err)
+				}
+				if _, err := s.db.Exec(`INSERT INTO torrent_tags (info_hash, tag) VALUES ($1, 'stalled') ON CONFLICT DO NOTHING`, hash); err != nil {
+					s.logger.Warn("stall level 3: persist stalled tag failed", "hash", hash, "error", err)
+				}
 			}
 
 			s.bus.Publish(ctx, events.Event{
@@ -281,7 +306,12 @@ func (s *Session) CheckStalls(ctx context.Context) {
 					"level":         int(level),
 					"peers":         stats.ActivePeers,
 					"seeders":       stats.ConnectedSeeders,
-					"archived":      true,
+					// archived flag retained for compatibility with the
+					// Pilot stallwatcher contract — true now means
+					// "auto-paused" (semantically the same: needs
+					// attention) rather than "dropped from engine".
+					"archived":  true,
+					"stalled_at": stalledAt.Format(time.RFC3339),
 				},
 			})
 		}
@@ -466,4 +496,28 @@ func nameOrEmpty(mt *managedTorrent) string {
 		return ""
 	}
 	return mt.t.Name()
+}
+
+// containsString reports whether xs contains s. Cheap O(n) — used only
+// on tags slices, which are typically a handful of entries.
+func containsString(xs []string, s string) bool {
+	for _, x := range xs {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+// removeString returns a copy of xs without any occurrence of s. Used
+// when un-stalling a torrent (Resume) — the auto-applied tag has to
+// come off so the row stops appearing in the "needs attention" filter.
+func removeString(xs []string, s string) []string {
+	out := xs[:0]
+	for _, x := range xs {
+		if x != s {
+			out = append(out, x)
+		}
+	}
+	return out
 }

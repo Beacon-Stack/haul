@@ -1,9 +1,14 @@
 package pulse
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
 	"os"
+	"time"
 
 	"github.com/beacon-stack/haul/internal/config"
 	"github.com/beacon-stack/haul/internal/version"
@@ -14,6 +19,57 @@ import (
 type Integration struct {
 	Client *sdk.Client
 	logger *slog.Logger
+
+	// pulseURL and pulseAPIKey are captured at construction so we can
+	// make HTTP calls to Pulse beyond what the pinned SDK version
+	// exposes. Specifically: api_key lookup for siblings (added to
+	// Pulse's discovery response in this branch but not yet to the
+	// SDK's Service struct, so we parse the raw JSON here).
+	pulseURL    string
+	pulseAPIKey string
+}
+
+// PeerService is a sibling Beacon service registered with Pulse,
+// including its API key. Only available via DiscoverWithKeys, not the
+// SDK's DiscoverAll, since the SDK's Service struct on the pinned
+// version doesn't include the key.
+type PeerService struct {
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	APIURL string `json:"api_url"`
+	APIKey string `json:"api_key"`
+}
+
+// DiscoverWithKeys returns siblings registered with Pulse, including
+// their API keys. Used by Haul's research-proxy endpoint to
+// authenticate server-to-server calls into Pilot/Prism without
+// requiring the user to wire per-service credentials.
+func (i *Integration) DiscoverWithKeys(ctx context.Context) ([]PeerService, error) {
+	if i == nil || i.pulseURL == "" {
+		return nil, fmt.Errorf("pulse integration not configured")
+	}
+	dctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(dctx, http.MethodGet, i.pulseURL+"/api/v1/services", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-Api-Key", i.pulseAPIKey)
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("pulse %d: %s", resp.StatusCode, string(body))
+	}
+	var out []PeerService
+	if err := json.Unmarshal(body, &out); err != nil {
+		return nil, fmt.Errorf("decode pulse response: %w", err)
+	}
+	return out, nil
 }
 
 // New creates and registers with Pulse using retry/backoff. Returns nil
@@ -78,7 +134,7 @@ func New(cfg config.PulseConfig, serverHost string, serverPort int, serviceAPIKe
 		return nil, nil
 	}
 
-	return &Integration{Client: client, logger: logger}, nil
+	return &Integration{Client: client, logger: logger, pulseURL: cfg.URL, pulseAPIKey: apiKey}, nil
 }
 
 // Close stops heartbeats.
