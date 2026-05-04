@@ -13,6 +13,7 @@ import SettingsPage from "@/pages/settings/SettingsPage";
 import MediaManagementPage from "@/pages/media-management/MediaManagementPage";
 import DiagnosticsPage from "@/pages/system/Diagnostics";
 import CleanupHistoryPage from "@/pages/system/CleanupHistory";
+import LogsPage from "@/pages/system/Logs";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 5000 } },
@@ -35,6 +36,7 @@ export default function App() {
               <Route path="settings" element={<SettingsPage />} />
               <Route path="system/diagnostics" element={<DiagnosticsPage />} />
               <Route path="system/cleanup-history" element={<CleanupHistoryPage />} />
+              <Route path="system/logs" element={<LogsPage />} />
             </Route>
           </Routes>
           <Toaster
