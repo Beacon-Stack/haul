@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
-import { AlertTriangle, ChevronDown, ChevronRight, Trash2, History } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight, Trash2, History, FileText } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useDiagnostics,
@@ -60,12 +60,20 @@ function Wrapper({ children }: { children: React.ReactNode }) {
         <h1 style={{ margin: 0, fontSize: 22, fontWeight: 600, color: "var(--color-text-primary)" }}>
           System diagnostics
         </h1>
-        <Link
-          to="/system/cleanup-history"
-          style={{ color: "var(--color-text-secondary)", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 }}
-        >
-          <History size={14} /> Cleanup history
-        </Link>
+        <div style={{ display: "flex", gap: 14 }}>
+          <Link
+            to="/system/logs"
+            style={{ color: "var(--color-text-secondary)", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 }}
+          >
+            <FileText size={14} /> Logs
+          </Link>
+          <Link
+            to="/system/cleanup-history"
+            style={{ color: "var(--color-text-secondary)", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 }}
+          >
+            <History size={14} /> Cleanup history
+          </Link>
+        </div>
       </div>
       <p style={{ margin: "0 0 16px", color: "var(--color-text-secondary)", fontSize: 13 }}>
         Each card detects rows that look stale or orphaned. Cleanup is soft by default — deleted rows go to the cleanup history and can be restored within the retention window.

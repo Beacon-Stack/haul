@@ -34,6 +34,7 @@ function buildNav(rssEnabled: boolean): NavItem[] {
     // surface. Always shown; the page itself explains what to do if
     // the HAUL_ADMIN_DIAGNOSTICS_ENABLED flag is off.
     { to: "/system/diagnostics", icon: Stethoscope, label: "System" },
+    { to: "/system/logs", icon: FileText, label: "Logs" },
     { to: "/settings", icon: Settings, label: "Settings" },
   );
   return items;
