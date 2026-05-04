@@ -285,7 +285,7 @@ func (s *Session) CheckSeedLimits(ctx context.Context) {
 		s.mu.RLock()
 		mt, ok := s.torrents[hash]
 		s.mu.RUnlock()
-		if !ok || mt.paused || !mt.ready {
+		if !ok || mt.paused || !mt.ready.Load() {
 			continue
 		}
 
@@ -458,7 +458,7 @@ func (s *Session) GetTransferStats() TransferStats {
 	}
 	snaps := make([]snap, 0, len(s.torrents))
 	for _, mt := range s.torrents {
-		if !mt.ready {
+		if !mt.ready.Load() {
 			continue
 		}
 		snaps = append(snaps, snap{mt: mt, t: mt.t, paused: mt.paused})

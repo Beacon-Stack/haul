@@ -4,14 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"io"
-
-	"golang.org/x/time/rate"
 )
-
-// newRateLimiter creates a rate.Limiter for the given bytes-per-second limit.
-func newRateLimiter(bytesPerSec int) *rate.Limiter {
-	return rate.NewLimiter(rate.Limit(bytesPerSec), bytesPerSec)
-}
 
 // bytes_reader wraps a byte slice in an io.ReadSeeker.
 func bytes_reader(b []byte) io.ReadSeeker {

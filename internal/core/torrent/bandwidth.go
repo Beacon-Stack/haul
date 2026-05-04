@@ -33,7 +33,7 @@ func (s *Session) AdaptiveBandwidth() {
 	var downloading []*managedTorrent
 	var hashes []string
 	for h, mt := range s.torrents {
-		if mt.paused || !mt.ready || mt.t.BytesMissing() == 0 {
+		if mt.paused || !mt.ready.Load() || mt.t.BytesMissing() == 0 {
 			continue
 		}
 		downloading = append(downloading, mt)

@@ -108,7 +108,7 @@ func (s *Session) GetHealth() *HealthReport {
 	var totalPeers int
 
 	for _, mt := range s.torrents {
-		if mt.paused || !mt.ready {
+		if mt.paused || !mt.ready.Load() {
 			continue
 		}
 		stats := mt.t.Stats()
