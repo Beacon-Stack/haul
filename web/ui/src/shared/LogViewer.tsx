@@ -24,7 +24,7 @@
 //   - Live-tail toggle: when on, polls every 2s. When off, the
 //     Refresh button fetches once.
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, RefreshCw, Search, Pause, Play } from "lucide-react";
 import { apiFetch } from "./api";
 
