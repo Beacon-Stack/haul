@@ -1,4 +1,6 @@
-import { Download, Upload, HardDrive, Activity } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { Download, Upload, HardDrive, Activity, AlertTriangle, X } from "lucide-react";
 import { useTorrents } from "@/api/torrents";
 import { useStats } from "@/api/stats";
 
@@ -21,19 +23,45 @@ export default function Dashboard() {
   const { data: torrents } = useTorrents();
   const { data: stats } = useStats();
 
-  const downloading = torrents?.filter((t) => t.status === "downloading") ?? [];
+  const downloading = torrents?.filter((t) => t.status === "downloading" && !t.stalled_at) ?? [];
   const queued = torrents?.filter((t) => t.status === "queued") ?? [];
   const seeding = torrents?.filter((t) => t.status === "seeding" || t.status === "completed") ?? [];
-  const paused = torrents?.filter((t) => t.status === "paused") ?? [];
+  // Auto-stalled torrents are excluded from "Paused" so the dashboard
+  // distinguishes "user paused this" (3) from "Haul auto-paused this
+  // because it's stuck" (1) — that signal is what the new card surfaces.
+  const paused = torrents?.filter((t) => t.status === "paused" && !t.stalled_at) ?? [];
+  const stalled = torrents?.filter((t) => !!t.stalled_at) ?? [];
 
   const totalDown = torrents?.reduce((sum, t) => sum + t.download_rate, 0) ?? 0;
   const totalUp = torrents?.reduce((sum, t) => sum + t.upload_rate, 0) ?? 0;
   const totalSize = torrents?.reduce((sum, t) => sum + t.size, 0) ?? 0;
 
+  // Banner dismissal — sessionStorage so it stays dismissed for this
+  // browsing session but reappears on tomorrow's first visit. Keyed
+  // on the count so adding a new stalled torrent re-shows the banner
+  // even if the user dismissed it earlier.
+  const [bannerDismissed, setBannerDismissed] = useState<number | null>(null);
+  useEffect(() => {
+    const v = sessionStorage.getItem("haul:stalled-banner-dismissed");
+    setBannerDismissed(v ? parseInt(v, 10) : null);
+  }, []);
+  const showBanner = stalled.length > 0 && bannerDismissed !== stalled.length;
+  const dismissBanner = () => {
+    sessionStorage.setItem("haul:stalled-banner-dismissed", String(stalled.length));
+    setBannerDismissed(stalled.length);
+  };
+
   const cards = [
     { label: "Downloading", value: downloading.length, icon: Download, color: "var(--color-status-downloading)" },
     { label: "Seeding", value: seeding.length, icon: Upload, color: "var(--color-status-seeding)" },
     { label: "Paused", value: paused.length, icon: Activity, color: "var(--color-status-paused)" },
+    {
+      label: "Needs attention",
+      value: stalled.length,
+      icon: AlertTriangle,
+      color: stalled.length > 0 ? "var(--color-status-stalled)" : "var(--color-text-muted)",
+      to: stalled.length > 0 ? "/?status=stalled" : undefined,
+    },
     { label: "Total Size", value: formatBytes(totalSize), icon: HardDrive, color: "var(--color-text-secondary)" },
   ];
 
@@ -47,6 +75,52 @@ export default function Dashboard() {
           {stats?.version ? `Haul ${stats.version}` : ""}
         </p>
       </div>
+
+      {/* Stalled banner — surfaces auto-paused torrents that need a call. */}
+      {showBanner && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            padding: "10px 14px",
+            marginBottom: 16,
+            background: "color-mix(in srgb, var(--color-status-stalled) 10%, transparent)",
+            border: "1px solid color-mix(in srgb, var(--color-status-stalled) 35%, transparent)",
+            borderRadius: 8,
+            fontSize: 13,
+            color: "var(--color-text-secondary)",
+          }}
+        >
+          <AlertTriangle size={15} style={{ color: "var(--color-status-stalled)", flexShrink: 0 }} />
+          <span style={{ flex: 1 }}>
+            <strong style={{ color: "var(--color-text-primary)" }}>
+              {stalled.length} {stalled.length === 1 ? "torrent" : "torrents"} need attention
+            </strong>
+            {" — "}
+            paused automatically because Haul couldn't find peers.{" "}
+            <Link to="/?status=stalled" style={{ color: "var(--color-status-stalled)", textDecoration: "underline" }}>
+              Review
+            </Link>
+            .
+          </span>
+          <button
+            onClick={dismissBanner}
+            aria-label="Dismiss"
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              color: "var(--color-text-muted)",
+              padding: 2,
+              display: "flex",
+              alignItems: "center",
+            }}
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* Speed bar */}
       <div
@@ -74,25 +148,33 @@ export default function Dashboard() {
 
       {/* Stat cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 14 }}>
-        {cards.map(({ label, value, icon: Icon, color }) => (
-          <div
-            key={label}
-            style={{
-              background: "var(--color-bg-surface)",
-              border: "1px solid var(--color-border-subtle)",
-              borderRadius: 8,
-              padding: "16px 20px",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-              <Icon size={14} style={{ color }} />
-              <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)" }}>
-                {label}
-              </span>
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 700, color: "var(--color-text-primary)" }}>{value}</div>
-          </div>
-        ))}
+        {cards.map(({ label, value, icon: Icon, color, to }) => {
+          const cardStyle: React.CSSProperties = {
+            background: "var(--color-bg-surface)",
+            border: "1px solid var(--color-border-subtle)",
+            borderRadius: 8,
+            padding: "16px 20px",
+            textDecoration: "none",
+            color: "inherit",
+            display: "block",
+            cursor: to ? "pointer" : "default",
+          };
+          const inner = (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+                <Icon size={14} style={{ color }} />
+                <span style={{ fontSize: 11, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)" }}>
+                  {label}
+                </span>
+              </div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: "var(--color-text-primary)" }}>{value}</div>
+            </>
+          );
+          if (to) {
+            return <Link key={label} to={to} style={cardStyle}>{inner}</Link>;
+          }
+          return <div key={label} style={cardStyle}>{inner}</div>;
+        })}
       </div>
 
       {/* Active downloads list + queued */}

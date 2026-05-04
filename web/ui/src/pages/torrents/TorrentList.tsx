@@ -1,9 +1,10 @@
-import { useState, useMemo, useRef } from "react";
-import { Link } from "react-router-dom";
+import { useState, useMemo, useRef, useEffect } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { Plus, Pause, Play, Trash2, Search, Download, Upload, HardDrive, GripVertical, Shield, ShieldOff, FileUp, X } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@beacon-shared/ConfirmDialog";
-import { useTorrents, useAddTorrent, useDeleteTorrent, usePauseTorrent, useResumeTorrent, useReorderTorrents, useSetTorrentPriority, type TorrentInfo } from "@/api/torrents";
+import { useTorrents, useAddTorrent, useDeleteTorrent, usePauseTorrent, useResumeTorrent, useReorderTorrents, useSetTorrentPriority, useSetTorrentCategory, useAddTorrentTags, useRemoveTorrentTags, useSetTorrentLocation, type TorrentInfo } from "@/api/torrents";
+import TorrentContextMenu, { type ContextMenuTarget } from "@/components/torrent/TorrentContextMenu";
 import { useHealth } from "@/api/health";
 import { useSettings } from "@/api/settings";
 import { torrentVisual, visualByKey, type TorrentVisualKey } from "@/lib/torrentStatus";
@@ -73,12 +74,15 @@ function isFinished(t: TorrentInfo): boolean {
 
 function matchesStatus(t: TorrentInfo, filter: StatusFilter): boolean {
   switch (filter) {
-    case "active":      return !isFinished(t);
-    case "downloading": return t.status === "downloading";
+    case "active":      return !isFinished(t) && !t.stalled_at;
+    case "downloading": return t.status === "downloading" && !t.stalled_at;
     case "seeding":     return t.status === "seeding";
     case "completed":   return isFinished(t);
-    case "paused":      return t.status === "paused";
-    case "stalled":     return t.status === "downloading" && t.stalled;
+    // Auto-stalled (stalled_at set) shows up as Stalled, not Paused —
+    // even though status === "paused" under the hood — so the user can
+    // tell apart "I paused this" from "Haul paused this because it's dead".
+    case "paused":      return t.status === "paused" && !t.stalled_at;
+    case "stalled":     return !!t.stalled_at || (t.status === "downloading" && t.stalled);
     case "failed":      return t.status === "failed";
     case "queued":      return t.status === "queued";
   }
@@ -353,7 +357,11 @@ function formatTimeActive(addedAt: string): string {
   return `${Math.floor(diff / 86400)}d ${Math.floor((diff % 86400) / 3600)}h`;
 }
 
-function TorrentCard({ t, draggable }: { t: TorrentInfo; draggable: boolean }) {
+function TorrentCard({ t, draggable, onContextMenu }: {
+  t: TorrentInfo;
+  draggable: boolean;
+  onContextMenu?: (t: TorrentInfo, x: number, y: number) => void;
+}) {
   const pause = usePauseTorrent();
   const resume = useResumeTorrent();
   const del = useDeleteTorrent();
@@ -392,6 +400,11 @@ function TorrentCard({ t, draggable }: { t: TorrentInfo; draggable: boolean }) {
   return (
     <div
       ref={setNodeRef}
+      onContextMenu={(e) => {
+        if (!onContextMenu) return;
+        e.preventDefault();
+        onContextMenu(t, e.clientX, e.clientY);
+      }}
       style={{
         ...style,
         background: "var(--color-bg-surface)",
@@ -529,9 +542,36 @@ export default function TorrentList() {
   const { data: torrents, isLoading } = useTorrents();
   const { data: settings } = useSettings();
   const [showAdd, setShowAdd] = useState(false);
-  const [statusFilters, setStatusFilters] = useState<Set<StatusFilter>>(new Set(["active"]));
+  // Seed the status filter from the URL query string so the
+  // dashboard's "Needs attention" card and banner can deep-link
+  // straight to the stalled-only view. Only consumed on the first
+  // render — after that, user clicks on the filter pills take over.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialStatus = searchParams.get("status");
+  const [statusFilters, setStatusFilters] = useState<Set<StatusFilter>>(() => {
+    if (initialStatus && ["active", "downloading", "seeding", "completed", "paused", "stalled", "failed", "queued"].includes(initialStatus)) {
+      return new Set([initialStatus as StatusFilter]);
+    }
+    return new Set(["active"]);
+  });
+  // Strip the param after we've consumed it so a refresh reverts to
+  // the default. Otherwise navigating away and back would silently
+  // re-enter the stalled-only view.
+  useEffect(() => {
+    if (initialStatus) {
+      const next = new URLSearchParams(searchParams);
+      next.delete("status");
+      setSearchParams(next, { replace: true });
+    }
+    // Run once on mount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [categoryFilters, setCategoryFilters] = useState<Set<string>>(new Set());
   const [tagFilters, setTagFilters] = useState<Set<string>>(new Set());
+  // Right-click context-menu state. Hoisted to the page so a single
+  // menu instance handles every row instead of N invisible menus.
+  const [ctxMenu, setCtxMenu] = useState<ContextMenuTarget | null>(null);
+  const [submodal, setSubmodal] = useState<{ kind: "category" | "tags" | "location"; t: TorrentInfo } | null>(null);
   const [sortField, setSortField] = useState<SortField>("manual");
   const [search, setSearch] = useState("");
   const [showFilters, setShowFilters] = useState(false);
@@ -1042,7 +1082,11 @@ export default function TorrentList() {
                         <div style={{ flex: 1, height: 1, background: "var(--color-status-queued)", opacity: 0.4 }} />
                       </div>
                     )}
-                    <TorrentCard t={t} draggable={sortField === "manual"} />
+                    <TorrentCard
+                      t={t}
+                      draggable={sortField === "manual"}
+                      onContextMenu={(target, x, y) => setCtxMenu({ torrent: target, x, y })}
+                    />
                   </div>
                 );
               })}
@@ -1052,6 +1096,250 @@ export default function TorrentList() {
       )}
 
       {showAdd && <AddModal onClose={() => setShowAdd(false)} />}
+
+      {ctxMenu && (
+        <TorrentContextMenu
+          target={ctxMenu}
+          onClose={() => setCtxMenu(null)}
+          onOpenSubmodal={(kind, t) => setSubmodal({ kind, t })}
+        />
+      )}
+
+      {submodal?.kind === "category" && (
+        <CategorySubmodal t={submodal.t} onClose={() => setSubmodal(null)} />
+      )}
+      {submodal?.kind === "tags" && (
+        <TagsSubmodal t={submodal.t} onClose={() => setSubmodal(null)} />
+      )}
+      {submodal?.kind === "location" && (
+        <LocationSubmodal t={submodal.t} onClose={() => setSubmodal(null)} />
+      )}
     </div>
   );
 }
+
+// ── Right-click submodals ────────────────────────────────────────────────────
+//
+// Each is a small inline form; nothing fancy. The category modal
+// double-duties as a category picker for both new categories and
+// existing ones — typing a name that doesn't match selects "create new".
+
+function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 9998,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "var(--color-bg-elevated)",
+          border: "1px solid var(--color-border-default)",
+          borderRadius: 10,
+          padding: 20,
+          width: 420,
+          maxWidth: "92vw",
+          boxShadow: "0 12px 36px rgba(0,0,0,0.45)",
+        }}
+      >
+        <h3 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 600, color: "var(--color-text-primary)" }}>{title}</h3>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function ModalActions({ onClose, onSubmit, submitLabel, pending }: { onClose: () => void; onSubmit: () => void; submitLabel: string; pending: boolean }) {
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+      <button
+        onClick={onClose}
+        style={{
+          padding: "7px 14px",
+          fontSize: 13,
+          borderRadius: 6,
+          border: "1px solid var(--color-border-default)",
+          background: "transparent",
+          color: "var(--color-text-secondary)",
+          cursor: "pointer",
+        }}
+      >
+        Cancel
+      </button>
+      <button
+        onClick={onSubmit}
+        disabled={pending}
+        style={{
+          padding: "7px 14px",
+          fontSize: 13,
+          fontWeight: 500,
+          borderRadius: 6,
+          border: "none",
+          background: "var(--color-accent)",
+          color: "white",
+          cursor: pending ? "not-allowed" : "pointer",
+          opacity: pending ? 0.6 : 1,
+        }}
+      >
+        {pending ? "Saving…" : submitLabel}
+      </button>
+    </div>
+  );
+}
+
+function CategorySubmodal({ t, onClose }: { t: TorrentInfo; onClose: () => void }) {
+  const [value, setValue] = useState(t.category ?? "");
+  const setCategory = useSetTorrentCategory();
+  const submit = () => {
+    setCategory.mutate(
+      { hash: t.info_hash, category: value.trim() },
+      {
+        onSuccess: () => {
+          toast.success(value.trim() ? `Category set to "${value.trim()}"` : "Category cleared");
+          onClose();
+        },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  };
+  return (
+    <ModalShell title="Set category" onClose={onClose}>
+      <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--color-text-muted)" }}>
+        Type a category name (or leave empty to clear).
+      </p>
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="e.g. tv, movies, music"
+        style={inputStyle}
+        onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+      />
+      <ModalActions onClose={onClose} onSubmit={submit} submitLabel="Save" pending={setCategory.isPending} />
+    </ModalShell>
+  );
+}
+
+function TagsSubmodal({ t, onClose }: { t: TorrentInfo; onClose: () => void }) {
+  const [addInput, setAddInput] = useState("");
+  const addTags = useAddTorrentTags();
+  const removeTags = useRemoveTorrentTags();
+  const tags = t.tags ?? [];
+
+  const submitAdd = () => {
+    const tag = addInput.trim();
+    if (!tag) return;
+    addTags.mutate(
+      { hash: t.info_hash, tags: [tag] },
+      {
+        onSuccess: () => {
+          setAddInput("");
+          toast.success(`Tag "${tag}" added`);
+        },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  };
+
+  return (
+    <ModalShell title="Edit tags" onClose={onClose}>
+      <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--color-text-muted)" }}>
+        Click a tag to remove it. Type below to add a new one.
+      </p>
+      {tags.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          {tags.map((tag) => (
+            <button
+              key={tag}
+              onClick={() =>
+                removeTags.mutate(
+                  { hash: t.info_hash, tags: [tag] },
+                  { onSuccess: () => toast.success(`Tag "${tag}" removed`), onError: (e) => toast.error((e as Error).message) },
+                )
+              }
+              style={{
+                padding: "3px 8px 3px 10px",
+                fontSize: 12,
+                borderRadius: 12,
+                background: "var(--color-bg-subtle)",
+                color: "var(--color-text-primary)",
+                border: "1px solid var(--color-border-subtle)",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+              title={`Remove tag "${tag}"`}
+            >
+              {tag} <X size={10} />
+            </button>
+          ))}
+        </div>
+      )}
+      <input
+        autoFocus
+        value={addInput}
+        onChange={(e) => setAddInput(e.target.value)}
+        placeholder="New tag name"
+        style={inputStyle}
+        onKeyDown={(e) => { if (e.key === "Enter") submitAdd(); }}
+      />
+      <ModalActions onClose={onClose} onSubmit={submitAdd} submitLabel="Add" pending={addTags.isPending} />
+    </ModalShell>
+  );
+}
+
+function LocationSubmodal({ t, onClose }: { t: TorrentInfo; onClose: () => void }) {
+  const [value, setValue] = useState(t.save_path ?? "");
+  const setLocation = useSetTorrentLocation();
+  const submit = () => {
+    const path = value.trim();
+    if (!path) return;
+    setLocation.mutate(
+      { hash: t.info_hash, path },
+      {
+        onSuccess: () => {
+          toast.success("Move started");
+          onClose();
+        },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
+  };
+  return (
+    <ModalShell title="Move torrent data" onClose={onClose}>
+      <p style={{ margin: "0 0 10px", fontSize: 12, color: "var(--color-text-muted)" }}>
+        New save path. Files will be moved on disk — large torrents take time.
+      </p>
+      <input
+        autoFocus
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        placeholder="/downloads/..."
+        style={inputStyle}
+        onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
+      />
+      <ModalActions onClose={onClose} onSubmit={submit} submitLabel="Move" pending={setLocation.isPending} />
+    </ModalShell>
+  );
+}
+
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "8px 12px",
+  fontSize: 13,
+  borderRadius: 6,
+  border: "1px solid var(--color-border-default)",
+  background: "var(--color-bg-surface)",
+  color: "var(--color-text-primary)",
+  outline: "none",
+  boxSizing: "border-box",
+};

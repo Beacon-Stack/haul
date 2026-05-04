@@ -39,9 +39,14 @@ type RequesterMetadata struct {
 // columns so Pilot/Prism's history-lookup queries can hit indexes
 // instead of scanning JSON.
 func (s *Session) SetMetadata(hash string, meta RequesterMetadata) error {
-	s.mu.RLock()
-	_, ok := s.torrents[hash]
-	s.mu.RUnlock()
+	s.mu.Lock()
+	mt, ok := s.torrents[hash]
+	if ok {
+		// Mirror the requester string into in-memory state so the
+		// /api/v1/torrents endpoint can surface it without a DB hit.
+		mt.requester = meta.Requester
+	}
+	s.mu.Unlock()
 	if !ok {
 		return fmt.Errorf("torrent not found: %s", hash)
 	}

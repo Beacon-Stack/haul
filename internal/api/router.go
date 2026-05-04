@@ -18,6 +18,7 @@ import (
 	"github.com/beacon-stack/haul/internal/core/tag"
 	"github.com/beacon-stack/haul/internal/core/torrent"
 	adminpkg "github.com/beacon-stack/haul/internal/db/admin"
+	"github.com/beacon-stack/haul/internal/pulse"
 	"github.com/beacon-stack/haul/internal/version"
 )
 
@@ -48,6 +49,10 @@ type RouterConfig struct {
 	// or DiagnosticsEnabled=false the routes are not registered at all
 	// (404 on every /api/v1/admin/* path).
 	Admin *AdminGate
+	// Pulse is the optional integration used to discover sibling
+	// services for the Activity page deep-links. Nil when Haul is
+	// running standalone — the peers endpoint then returns an empty map.
+	Pulse *pulse.Integration
 }
 
 // AdminGate is the runtime knob for the admin-only endpoints. Held by
@@ -109,6 +114,9 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	v1.RegisterTorrentRoutes(humaAPI, cfg.Session)
 	v1.RegisterTorrentControlRoutes(humaAPI, cfg.Session)
 	v1.RegisterHistoryRoutes(humaAPI, cfg.Session)
+	v1.RegisterActivityRoutes(humaAPI, cfg.DB)
+	v1.RegisterPeerRoutes(humaAPI, cfg.Pulse)
+	v1.RegisterResearchRoutes(humaAPI, cfg.Session, cfg.Pulse)
 	v1.RegisterCategoryRoutes(humaAPI, cfg.Categories)
 	v1.RegisterTagRoutes(humaAPI, cfg.Tags)
 	v1.RegisterStatsRoutes(humaAPI, cfg.Session)
