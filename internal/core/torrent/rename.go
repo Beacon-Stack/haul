@@ -11,10 +11,26 @@ import (
 
 // renameCompleted renames downloaded files using the renamer when
 // RequesterMetadata is available. Called after a torrent finishes downloading.
+//
+// Skips the rename entirely when the requester is Pilot or Prism. Those
+// services own the import + rename step in their own pipelines — if
+// Haul renames first, the file's path changes out from under their
+// importer mid-flight and the import either fails or finds the file
+// only via a fuzzy name search. The rename_on_complete toggle is meant
+// for standalone Haul deployments where no arr is in the loop; the UI
+// already disables it when Pulse reports an arr peer (see Media
+// Management page) but a legacy user with the toggle set on a saved
+// state could still hit this path. Belt-and-suspenders.
 func (s *Session) renameCompleted(hash string, mt *managedTorrent) {
 	meta, err := s.GetMetadata(hash)
 	if err != nil || meta == nil || meta.Title == "" {
 		return // no metadata — keep original names
+	}
+
+	if shouldSkipRenameForRequester(meta.Requester) {
+		s.logger.Debug("rename skipped: arr-requested torrent — let the manager handle the import",
+			"hash", hash, "requester", meta.Requester)
+		return
 	}
 
 	info := mt.t.Info()
@@ -177,6 +193,22 @@ func isMediaExt(ext string) bool {
 		".ts", ".m2ts", ".webm", ".ogv", ".divx",
 		".mp3", ".flac", ".aac", ".ogg", ".wav", ".wma",
 		".srt", ".sub", ".ass", ".ssa", ".idx":
+		return true
+	}
+	return false
+}
+
+// shouldSkipRenameForRequester is the gate that prevents Haul from
+// double-renaming files when an arr (Pilot/Prism) requested the
+// torrent. Those services own the rename step in their own import
+// pipelines; if Haul renames first, the file's path changes out
+// from under their importer mid-flight. The list is exact-match —
+// case-sensitive, no fuzzy substring matching — because Pilot/Prism
+// stamp the requester field with one of these constants verbatim
+// (see internal/core/torrent/metadata.go RequesterMetadata.Requester).
+func shouldSkipRenameForRequester(requester string) bool {
+	switch requester {
+	case "pilot", "prism":
 		return true
 	}
 	return false
