@@ -21,6 +21,15 @@ import type { TorrentInfo, StallInfo, PiecesInfo, TrackerInfo, PeerInfo, Torrent
 // them in beforeEach before each render.
 const stallState: { value: StallInfo | undefined } = { value: undefined };
 
+// Mock PieceBar — its useEffect uses `new ResizeObserver(...)` which
+// jsdom doesn't ship. The vitest.setup.ts polyfill works for direct
+// globalThis access but the bare identifier in the rendered useEffect
+// resolves through a different path. Mocking is more robust and the
+// test is about StallCallout anyway.
+vi.mock("@/components/torrent/PieceBar", () => ({
+  default: () => null,
+}));
+
 vi.mock("@/api/torrents", async () => {
   const actual = await vi.importActual<typeof import("@/api/torrents")>("@/api/torrents");
   // useTorrent / useTorrentFiles / etc. — plain shims that match the

@@ -622,7 +622,6 @@ func TestGetInfo_NoPeersEverPreMetadata_StalledTrue(t *testing.T) {
 	session.torrents[randomHash.HexString()] = &managedTorrent{
 		t:       tHandle,
 		addedAt: time.Now().Add(-1 * time.Second), // already past firstPeerTimeout (10ms)
-		ready:   false,                             // pre-metadata: no metainfo
 	}
 	session.mu.Unlock()
 
