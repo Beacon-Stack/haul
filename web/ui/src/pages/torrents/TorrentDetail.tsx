@@ -8,6 +8,7 @@ import {
   useTorrentPeers,
   useTorrentPieces,
   useTorrentTrackers,
+  useTorrentStall,
 } from "@/api/torrents";
 import { Pause, Play, Trash2, FileText, Link2, Hash, Download } from "lucide-react";
 import { toast } from "sonner";
@@ -18,6 +19,7 @@ import PieceBar from "@/components/torrent/PieceBar";
 import PeerList from "@/components/torrent/PeerList";
 import TrackerList from "@/components/torrent/TrackerList";
 import CollapsibleSection from "@/components/torrent/CollapsibleSection";
+import StallCallout from "@/components/torrent/StallCallout";
 
 function formatBytes(b: number): string {
   if (b <= 0) return "0 B";
@@ -53,6 +55,11 @@ export default function TorrentDetail() {
 
   const peers = peersResp?.peers ?? [];
   const trackers = trackersResp?.trackers ?? [];
+  // Stall classification — drives the callout banner above the facts grid.
+  // The hook polls /api/v1/torrents/{hash}/stall every 5s; render the
+  // callout only when the backend has explicitly classified the torrent
+  // as stalled (zero-init or absent → no callout).
+  const { data: stall } = useTorrentStall(hash ?? "");
 
   async function handleDelete() {
     if (!t) return;
@@ -169,6 +176,12 @@ export default function TorrentDetail() {
           <div style={{ width: `${Math.min(t.progress * 100, 100)}%`, height: "100%", borderRadius: 3, background: visual.color, transition: "width 0.3s" }} />
         </div>
       </div>
+
+      {/* Stall callout — surfaces multi-level classification (level + reason
+          + inactive duration) when /api/v1/torrents/{hash}/stall reports a
+          non-zero stall. The "Status: Stalled" facts cell only signals THAT
+          a torrent is stalled; this banner explains WHY. */}
+      {stall?.stalled && <StallCallout stall={stall} />}
 
       {/* Facts grid */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 10, marginBottom: 28 }}>

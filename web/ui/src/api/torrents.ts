@@ -83,6 +83,23 @@ export interface TrackerInfo {
   url: string;
 }
 
+// StallInfo mirrors internal/core/torrent/stall.go's StallInfo. Returned by
+// /api/v1/torrents/{hash}/stall. The detail page renders a callout when
+// `stalled` is true, using `level` + `reason` to pick severity colour and
+// human-readable copy.
+//
+// `level` is the StallLevel enum: 0=none, 1=L1 reannounce, 2=L2 force DHT,
+// 3=L3 archive candidate, 4=no_peers_ever (the "dead torrent" classification
+// — pre-metadata or post-metadata torrent that never observed a single
+// peer). The renderer treats 4 as a distinct severity, not just "level 4".
+export interface StallInfo {
+  stalled: boolean;
+  level: 0 | 1 | 2 | 3 | 4;
+  inactive_secs: number;
+  last_activity?: string;
+  reason: string;
+}
+
 export function useTorrents() {
   return useQuery({
     queryKey: ["torrents"],
@@ -162,6 +179,20 @@ export function useRemoveTracker(hash: string) {
         method: "DELETE",
       }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents", hash, "trackers"] }),
+  });
+}
+
+// useTorrentStall fetches the per-torrent stall classification. Used by the
+// detail page to render a callout above the facts grid when the backend has
+// classified the torrent as stalled. Polls at 5s — slower than the row
+// poll because the classification only changes when a stall threshold is
+// crossed (default 120s for activity-based, 180s for no_peers_ever).
+export function useTorrentStall(hash: string) {
+  return useQuery({
+    queryKey: ["torrents", hash, "stall"],
+    queryFn: () => apiFetch<StallInfo>(`/torrents/${hash}/stall`),
+    enabled: !!hash,
+    refetchInterval: 5000,
   });
 }
 

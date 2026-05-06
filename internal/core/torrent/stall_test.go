@@ -583,3 +583,69 @@ func TestGetStallInfo_PreMetadataWithinTimeoutNotStalled(t *testing.T) {
 		t.Errorf("Stalled = true, want false (still within firstPeerTimeout window)")
 	}
 }
+
+// ── Info.Stalled per-row exposure ─────────────────────────────────────────
+//
+// The dashboard's `Stalled` filter pill counts torrents where Info.Stalled
+// is true. Before this fix, a pre-metadata magnet that never observed a
+// peer (the headline "dead torrent" case) was returned as Stalled=false
+// from Session.Get / Session.List even though /api/v1/stalls listed it as
+// no_peers_ever. The pill silently read 0 while the bulk endpoint reported
+// the torrent — the contradiction between two surfaces of the same logic.
+//
+// This test pins the per-row Info.Stalled to agree with ListStalled for
+// the pre-metadata no_peers_ever path. If it fails, the dashboard's
+// Stalled counter is broken again.
+func TestGetInfo_NoPeersEverPreMetadata_StalledTrue(t *testing.T) {
+	saved1 := firstPeerTimeout
+	saved2 := sessionStartupGrace
+	firstPeerTimeout = 10 * time.Millisecond
+	sessionStartupGrace = 0
+	t.Cleanup(func() {
+		firstPeerTimeout = saved1
+		sessionStartupGrace = saved2
+	})
+
+	session := newTestSession(t)
+
+	var randomHash metainfo.Hash
+	copy(randomHash[:], []byte("getinfo-no-peers-stld"))
+	spec := &lt.TorrentSpec{
+		AddTorrentOpts: lt.AddTorrentOpts{InfoHash: randomHash},
+		DisplayName:    "getinfo-no-peers-test",
+	}
+	if _, _, err := session.client.AddTorrentSpec(spec); err != nil {
+		t.Fatalf("adding test torrent: %v", err)
+	}
+	tHandle, _ := session.client.Torrent(randomHash)
+	session.mu.Lock()
+	session.torrents[randomHash.HexString()] = &managedTorrent{
+		t:       tHandle,
+		addedAt: time.Now().Add(-1 * time.Second), // already past firstPeerTimeout (10ms)
+	}
+	session.mu.Unlock()
+
+	// Wait past firstPeerTimeout so the no-peers-ever rule fires.
+	time.Sleep(50 * time.Millisecond)
+
+	info, err := session.Get(randomHash.HexString())
+	if err != nil {
+		t.Fatalf("Session.Get: %v", err)
+	}
+	if !info.Stalled {
+		t.Fatal("REGRESSION: Info.Stalled = false for a pre-metadata torrent past firstPeerTimeout. " +
+			"The dashboard's Stalled filter pill will silently read 0 again while " +
+			"/api/v1/stalls lists the torrent — the original visibility bug. " +
+			"Check classifyStalled in session.go: rule 3 (no peers ever) must run before " +
+			"the !hasInfo guard, matching ListStalled and CheckStalls.")
+	}
+
+	// Sanity-check that ListStalled agrees so the two surfaces stay in sync.
+	stalls := session.ListStalled()
+	if len(stalls) != 1 {
+		t.Fatalf("ListStalled() = %d entries, want 1; the per-row Stalled=true must match the bulk surface", len(stalls))
+	}
+	if stalls[0].Reason != ReasonNoPeersEver {
+		t.Errorf("stalls[0].Reason = %q, want %q", stalls[0].Reason, ReasonNoPeersEver)
+	}
+}
