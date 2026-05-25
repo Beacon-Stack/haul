@@ -9,9 +9,12 @@ package v1
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -151,29 +154,106 @@ func RegisterAdminCleanupHistoryRoutes(api huma.API, registry *adminpkg.Registry
 	})
 }
 
-// restoreTorrentRow re-inserts the captured row into the torrents
-// table. Uses ON CONFLICT DO NOTHING so a same-PK row that's appeared
-// in the meantime isn't overwritten — the caller is told the row
-// already exists and decides whether to drop the cleanup_history entry.
+// restoreTorrentRow re-inserts the captured row into the torrents table.
+// ON CONFLICT DO NOTHING so a same-PK row that's appeared in the meantime
+// isn't overwritten.
 //
-// We unmarshal explicit columns rather than relying on jsonb_to_record
-// so we get a clear error if the captured row's shape doesn't match the
-// current schema (after a future migration).
+// SQLite has no equivalent of Postgres' jsonb_populate_record. To stay
+// schema-agnostic across future migrations we (a) read the current torrents
+// column set from PRAGMA table_info, (b) parse the captured JSON snapshot,
+// (c) drop any JSON keys that no longer match a real column, then (d)
+// build a parameterised INSERT from what's left. New columns (added since
+// the snapshot was taken) just get their DDL defaults; removed columns are
+// silently skipped — same recovery semantics as the old Postgres path.
 func restoreTorrentRow(ctx context.Context, db *sql.DB, entry *adminpkg.HistoryEntry) (bool, error) {
-	// Postgres' jsonb_populate_record + INSERT … SELECT keeps us
-	// schema-agnostic up to the columns torrents has at restore time.
-	// Columns added by future migrations get NULL/default values; columns
-	// removed are silently dropped — both are acceptable for a recovery
-	// path. The alternative (enumerating every column here) means every
-	// torrents schema change has to remember to update this restore.
-	res, err := db.ExecContext(ctx, `
-		INSERT INTO torrents
-		SELECT * FROM jsonb_populate_record(NULL::torrents, $1::jsonb)
-		ON CONFLICT (info_hash) DO NOTHING
-	`, []byte(entry.RowData))
+	cols, err := torrentsColumns(ctx, db)
+	if err != nil {
+		return false, err
+	}
+	allowed := make(map[string]bool, len(cols))
+	for _, c := range cols {
+		allowed[c] = true
+	}
+
+	var snapshot map[string]json.RawMessage
+	if err := json.Unmarshal(entry.RowData, &snapshot); err != nil {
+		return false, fmt.Errorf("decoding cleanup_history row_data: %w", err)
+	}
+
+	keep := make([]string, 0, len(snapshot))
+	placeholders := make([]string, 0, len(snapshot))
+	args := make([]any, 0, len(snapshot))
+	for col, raw := range snapshot {
+		if !allowed[col] {
+			continue // column no longer exists in current torrents schema
+		}
+		var v any
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return false, fmt.Errorf("decoding cleanup_history value for %q: %w", col, err)
+		}
+		keep = append(keep, col)
+		placeholders = append(placeholders, "?")
+		args = append(args, v)
+	}
+	if len(keep) == 0 {
+		return false, fmt.Errorf("cleanup_history row has no columns matching torrents schema")
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO torrents (%s) VALUES (%s) ON CONFLICT (info_hash) DO NOTHING`,
+		quoteIdentList(keep), strings.Join(placeholders, ", "),
+	)
+	res, err := db.ExecContext(ctx, query, args...)
 	if err != nil {
 		return false, fmt.Errorf("inserting torrents row from cleanup_history: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	return n > 0, nil
+}
+
+// torrentsColumns returns the live torrents column names via PRAGMA table_info.
+// The result is cached process-wide; the schema is created at startup and
+// doesn't change while the binary runs.
+func torrentsColumns(ctx context.Context, db *sql.DB) ([]string, error) {
+	torrentsColumnsOnce.Do(func() {
+		rows, err := db.QueryContext(ctx, `PRAGMA table_info(torrents)`)
+		if err != nil {
+			torrentsColumnsErr = err
+			return
+		}
+		defer rows.Close()
+		var cols []string
+		for rows.Next() {
+			var cid int
+			var name, ctype string
+			var notnull, pk int
+			var dflt sql.NullString
+			if err := rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk); err != nil {
+				torrentsColumnsErr = err
+				return
+			}
+			cols = append(cols, name)
+		}
+		torrentsColumnsCache = cols
+		torrentsColumnsErr = rows.Err()
+	})
+	return torrentsColumnsCache, torrentsColumnsErr
+}
+
+var (
+	torrentsColumnsOnce  sync.Once
+	torrentsColumnsCache []string
+	torrentsColumnsErr   error
+)
+
+// quoteIdentList renders a slice of column names as a comma-separated list
+// of double-quoted identifiers. Each name is already validated against the
+// PRAGMA table_info result, so embedded quotes/whitespace are not possible
+// in practice — the quoting is defence in depth.
+func quoteIdentList(cols []string) string {
+	out := make([]string, len(cols))
+	for i, c := range cols {
+		out[i] = `"` + strings.ReplaceAll(c, `"`, `""`) + `"`
+	}
+	return strings.Join(out, ", ")
 }

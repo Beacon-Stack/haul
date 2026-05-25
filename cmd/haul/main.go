@@ -121,11 +121,10 @@ func main() {
 	defer database.Close()
 
 	logger.Info("database connected",
-		"driver", database.Driver,
 		"path", cfg.Database.Path,
 	)
 
-	if err := db.Migrate(database.SQL, database.Driver); err != nil {
+	if err := db.Migrate(database.SQL); err != nil {
 		logger.Error("database migration failed", "error", err)
 		os.Exit(1)
 	}

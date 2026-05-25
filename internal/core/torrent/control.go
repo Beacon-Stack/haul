@@ -33,7 +33,7 @@ func (s *Session) SetCategory(hash, category string) error {
 	mt.category = category
 	s.mu.Unlock()
 
-	_, err := s.db.Exec(`UPDATE torrents SET category = $1 WHERE info_hash = $2`, category, hash)
+	_, err := s.db.Exec(`UPDATE torrents SET category = ? WHERE info_hash = ?`, category, hash)
 	return err
 }
 
@@ -47,7 +47,7 @@ func (s *Session) AddTags(hash string, tags []string) error {
 	}
 
 	for _, tag := range tags {
-		_, _ = s.db.Exec(`INSERT INTO torrent_tags (info_hash, tag) VALUES ($1, $2) ON CONFLICT DO NOTHING`, hash, tag)
+		_, _ = s.db.Exec(`INSERT INTO torrent_tags (info_hash, tag) VALUES (?, ?) ON CONFLICT DO NOTHING`, hash, tag)
 	}
 
 	// Refresh in-memory tags.
@@ -75,7 +75,7 @@ func (s *Session) RemoveTags(hash string, tags []string) error {
 	}
 
 	for _, tag := range tags {
-		_, _ = s.db.Exec(`DELETE FROM torrent_tags WHERE info_hash = $1 AND tag = $2`, hash, tag)
+		_, _ = s.db.Exec(`DELETE FROM torrent_tags WHERE info_hash = ? AND tag = ?`, hash, tag)
 	}
 
 	// Refresh in-memory tags.
@@ -105,7 +105,7 @@ func (s *Session) SetSpeedLimits(hash string, downloadLimit, uploadLimit int) er
 		return fmt.Errorf("torrent not found: %s", hash)
 	}
 
-	_, err := s.db.Exec(`UPDATE torrents SET download_limit = $1, upload_limit = $2 WHERE info_hash = $3`,
+	_, err := s.db.Exec(`UPDATE torrents SET download_limit = ?, upload_limit = ? WHERE info_hash = ?`,
 		downloadLimit, uploadLimit, hash)
 	return err
 }
@@ -119,7 +119,7 @@ func (s *Session) SetSeedLimits(hash string, ratioLimit float64, timeLimitSecs i
 		return fmt.Errorf("torrent not found: %s", hash)
 	}
 
-	_, err := s.db.Exec(`UPDATE torrents SET seed_ratio_limit = $1, seed_time_limit = $2 WHERE info_hash = $3`,
+	_, err := s.db.Exec(`UPDATE torrents SET seed_ratio_limit = ?, seed_time_limit = ? WHERE info_hash = ?`,
 		ratioLimit, timeLimitSecs, hash)
 	return err
 }
@@ -137,7 +137,7 @@ func (s *Session) SetPriority(hash string, priority int) error {
 		return fmt.Errorf("torrent not found: %s", hash)
 	}
 
-	if _, err := s.db.Exec(`UPDATE torrents SET priority = $1 WHERE info_hash = $2`, priority, hash); err != nil {
+	if _, err := s.db.Exec(`UPDATE torrents SET priority = ? WHERE info_hash = ?`, priority, hash); err != nil {
 		return err
 	}
 
@@ -154,7 +154,7 @@ func (s *Session) SetSequential(hash string, sequential bool) error {
 		return fmt.Errorf("torrent not found: %s", hash)
 	}
 
-	_, err := s.db.Exec(`UPDATE torrents SET sequential = $1 WHERE info_hash = $2`, sequential, hash)
+	_, err := s.db.Exec(`UPDATE torrents SET sequential = ? WHERE info_hash = ?`, sequential, hash)
 	return err
 }
 
@@ -185,7 +185,7 @@ func (s *Session) SetLocation(hash, newPath string) error {
 		}
 	}
 
-	_, err := s.db.Exec(`UPDATE torrents SET save_path = $1 WHERE info_hash = $2`, newPath, hash)
+	_, err := s.db.Exec(`UPDATE torrents SET save_path = ? WHERE info_hash = ?`, newPath, hash)
 	return err
 }
 
@@ -297,7 +297,7 @@ func (s *Session) CheckSeedLimits(ctx context.Context) {
 		// Check ratio limit from DB.
 		var ratioLimit *float64
 		var timeLimit *int
-		_ = s.db.QueryRow(`SELECT seed_ratio_limit, seed_time_limit FROM torrents WHERE info_hash = $1`, hash).
+		_ = s.db.QueryRow(`SELECT seed_ratio_limit, seed_time_limit FROM torrents WHERE info_hash = ?`, hash).
 			Scan(&ratioLimit, &timeLimit)
 
 		// Fall back to global defaults.
@@ -318,7 +318,7 @@ func (s *Session) CheckSeedLimits(ctx context.Context) {
 
 		// Determine effective action.
 		var perTorrentAction string
-		_ = s.db.QueryRow(`SELECT seed_limit_action FROM torrents WHERE info_hash = $1`, hash).Scan(&perTorrentAction)
+		_ = s.db.QueryRow(`SELECT seed_limit_action FROM torrents WHERE info_hash = ?`, hash).Scan(&perTorrentAction)
 		action := s.cfg.SeedLimitAction
 		if perTorrentAction != "" {
 			action = perTorrentAction

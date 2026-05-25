@@ -85,7 +85,7 @@ func (p *Persister) HandleEvent(ctx context.Context, e events.Event) {
 
 	_, err := p.db.ExecContext(ctx, `
 		INSERT INTO torrent_events (info_hash, event_type, occurred_at, payload)
-		VALUES ($1, $2, $3, $4)`,
+		VALUES (?, ?, ?, ?)`,
 		e.InfoHash, string(e.Type), e.Timestamp, payload,
 	)
 	if err != nil {

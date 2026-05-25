@@ -48,7 +48,7 @@ type CaptureContext struct {
 // the input pairs (caller may want to log them).
 //
 // rowJSON should be the JSONB-encoded full row at deletion time. The
-// caller is responsible for encoding (typically `SELECT row_to_json(t)::jsonb FROM <table> t WHERE pk = ANY($1)`).
+// caller is responsible for encoding (typically `SELECT row_to_json(t)::jsonb FROM <table> t WHERE pk = ANY(?)`).
 func InsertCleanupHistory(ctx context.Context, tx *sql.Tx, capture CaptureContext, sourcePKs []string, rowsJSON [][]byte) ([]int64, error) {
 	if len(sourcePKs) != len(rowsJSON) {
 		return nil, fmt.Errorf("InsertCleanupHistory: pks=%d rows=%d (must match)", len(sourcePKs), len(rowsJSON))
@@ -58,7 +58,7 @@ func InsertCleanupHistory(ctx context.Context, tx *sql.Tx, capture CaptureContex
 		var id int64
 		err := tx.QueryRowContext(ctx, `
 			INSERT INTO cleanup_history (diagnostic, source_table, source_pk, row_data, request_id, actor_key_prefix)
-			VALUES ($1, $2, $3, $4, $5, $6)
+			VALUES (?, ?, ?, ?, ?, ?)
 			RETURNING id
 		`, capture.Diagnostic, capture.SourceTable, pk, rowsJSON[i], capture.RequestID, capture.ActorKeyPrefix).Scan(&id)
 		if err != nil {
@@ -79,10 +79,10 @@ func (r *Registry) ListHistory(ctx context.Context, filter HistoryListFilter) ([
 	q := `
 		SELECT id, diagnostic, source_table, source_pk, row_data, deleted_at, request_id, actor_key_prefix
 		  FROM cleanup_history
-		 WHERE ($3 = '' OR diagnostic = $3)
-		   AND ($4 = '' OR source_table = $4)
+		 WHERE (? = '' OR diagnostic = ?)
+		   AND (? = '' OR source_table = ?)
 		 ORDER BY deleted_at DESC, id DESC
-		 LIMIT $1 OFFSET $2`
+		 LIMIT ? OFFSET ?`
 	args = append(args, filter.Diagnostic, filter.SourceTable)
 
 	rows, err := r.db.QueryContext(ctx, q, args...)
@@ -106,11 +106,15 @@ func (r *Registry) ListHistory(ctx context.Context, filter HistoryListFilter) ([
 
 // PurgeOlderThan hard-deletes cleanup_history rows whose deleted_at is
 // older than now - retention. Returns rows affected. Idempotent.
+//
+// deleted_at is TEXT-encoded RFC3339; the cutoff is computed in Go and
+// compared lexicographically (RFC3339 sorts the same as time).
 func (r *Registry) PurgeOlderThan(ctx context.Context, retention time.Duration) (int64, error) {
+	cutoff := time.Now().UTC().Add(-retention).Format(time.RFC3339)
 	res, err := r.db.ExecContext(ctx, `
 		DELETE FROM cleanup_history
-		 WHERE deleted_at < NOW() - $1::interval
-	`, fmt.Sprintf("%d seconds", int64(retention.Seconds())))
+		 WHERE deleted_at < ?
+	`, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("purging cleanup_history: %w", err)
 	}
@@ -130,7 +134,7 @@ func (r *Registry) GetHistoryEntry(ctx context.Context, id int64) (*HistoryEntry
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, diagnostic, source_table, source_pk, row_data, deleted_at, request_id, actor_key_prefix
 		  FROM cleanup_history
-		 WHERE id = $1
+		 WHERE id = ?
 	`, id).Scan(&e.ID, &e.Diagnostic, &e.SourceTable, &e.SourcePK, &raw, &e.DeletedAt, &e.RequestID, &e.ActorKeyPrefix)
 	if err != nil {
 		return nil, err
@@ -142,6 +146,6 @@ func (r *Registry) GetHistoryEntry(ctx context.Context, id int64) (*HistoryEntry
 // DeleteHistoryEntry removes one cleanup_history row by id (used after a
 // successful restore so the entry doesn't reappear in the trash list).
 func (r *Registry) DeleteHistoryEntry(ctx context.Context, id int64) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM cleanup_history WHERE id = $1`, id)
+	_, err := r.db.ExecContext(ctx, `DELETE FROM cleanup_history WHERE id = ?`, id)
 	return err
 }

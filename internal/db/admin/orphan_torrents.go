@@ -3,16 +3,17 @@ package admin
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
 
 // SessionRemover is the narrow surface OrphanTorrents needs from the
-// torrent Session — just enough to look up which hashes are currently
+// torrent Session - just enough to look up which hashes are currently
 // in-memory. Defined here (instead of importing core/torrent) so the
 // admin package doesn't depend on the torrent engine.
 //
-// Note: we deliberately do NOT use Session.Remove for the cleanup —
+// Note: we deliberately do NOT use Session.Remove for the cleanup -
 // orphan rows are by definition NOT in the in-memory map, so
 // Session.Remove returns "torrent not found". Direct DB delete is the
 // correct path; the bolt-DB piece-completion entry (if any) becomes a
@@ -24,7 +25,7 @@ type SessionRemover interface {
 
 // OrphanTorrents detects torrent rows that exist in the DB but aren't
 // tracked by the in-memory engine. These are the "ghost rows" that
-// today's smoke-fixture cleanup surfaced — a delete via the API can
+// today's smoke-fixture cleanup surfaced - a delete via the API can
 // silently leave the DB row behind in some edge cases, and on restart
 // restoreFromDB happily re-loads them.
 type OrphanTorrents struct {
@@ -43,8 +44,6 @@ func (o *OrphanTorrents) Description() string { return "Torrent rows in DB but n
 func (o *OrphanTorrents) Detect(ctx context.Context) ([]Row, error) {
 	live := o.session.LiveHashes()
 
-	// Pull the persisted set. Cheap — we have ~tens to ~thousands of
-	// rows max in any realistic install.
 	rows, err := o.db.QueryContext(ctx, `
 		SELECT info_hash, name, added_at, completed_at IS NOT NULL AS completed
 		  FROM torrents
@@ -56,14 +55,13 @@ func (o *OrphanTorrents) Detect(ctx context.Context) ([]Row, error) {
 
 	var orphans []Row
 	for rows.Next() {
-		var hash, name string
-		var addedAt sql.NullTime
+		var hash, name, addedAt string
 		var completed bool
 		if err := rows.Scan(&hash, &name, &addedAt, &completed); err != nil {
 			return nil, fmt.Errorf("scanning torrents row: %w", err)
 		}
 		if _, ok := live[hash]; ok {
-			continue // tracked — not an orphan
+			continue // tracked - not an orphan
 		}
 		state := "incomplete"
 		if completed {
@@ -71,7 +69,7 @@ func (o *OrphanTorrents) Detect(ctx context.Context) ([]Row, error) {
 		}
 		orphans = append(orphans, Row{
 			ID:              hash,
-			Summary:         fmt.Sprintf("%s — %s", truncName(name), state),
+			Summary:         fmt.Sprintf("%s - %s", truncName(name), state),
 			WhyFlagged:      "no in-memory torrent for this info_hash",
 			SuggestedAction: "Delete the orphan DB row + bolt-DB piece-completion entry",
 		})
@@ -81,15 +79,14 @@ func (o *OrphanTorrents) Detect(ctx context.Context) ([]Row, error) {
 
 func truncName(s string) string {
 	if len(s) > 60 {
-		return s[:57] + "…"
+		return s[:57] + "..."
 	}
 	return s
 }
 
 // Cleanup deletes the listed (or all-matching) orphans. Soft mode
-// captures the full torrents row as JSONB into cleanup_history before
-// removing. The actual DB row removal + bolt cleanup is delegated to
-// session.RemoveByHash so we don't duplicate that logic here.
+// captures the full torrents row as JSON into cleanup_history before
+// removing.
 func (o *OrphanTorrents) Cleanup(ctx context.Context, req CleanupRequest) (CleanupResult, error) {
 	hashes := req.IDs
 	if req.All {
@@ -109,7 +106,7 @@ func (o *OrphanTorrents) Cleanup(ctx context.Context, req CleanupRequest) (Clean
 
 	// Re-confirm orphan-ness right before deleting. A torrent that came
 	// back into the in-memory engine since Detect() ran should NOT be
-	// deleted — that would yank a live torrent.
+	// deleted - that would yank a live torrent.
 	live := o.session.LiveHashes()
 	confirmed := make([]string, 0, len(hashes))
 	for _, h := range hashes {
@@ -121,9 +118,6 @@ func (o *OrphanTorrents) Cleanup(ctx context.Context, req CleanupRequest) (Clean
 		return CleanupResult{}, ErrNoMatch
 	}
 
-	// Soft mode: snapshot + cleanup_history insert + direct DB delete in
-	// a single transaction. Hard mode skips the cleanup_history insert
-	// but still deletes in a transaction for atomicity.
 	tx, err := o.db.BeginTx(ctx, nil)
 	if err != nil {
 		return CleanupResult{}, err
@@ -139,21 +133,22 @@ func (o *OrphanTorrents) Cleanup(ctx context.Context, req CleanupRequest) (Clean
 		historyIDs = ids
 	}
 
-	// Direct DELETE FROM torrents — orphans aren't in the engine, so
-	// Session.Remove can't help us here (it would return "not found").
+	args := stringsToAny(confirmed)
+	placeholders := inPlaceholders(len(confirmed))
+
 	res, err := tx.ExecContext(ctx,
-		`DELETE FROM torrents WHERE info_hash = ANY($1)`,
-		pgArray(confirmed))
+		`DELETE FROM torrents WHERE info_hash IN (`+placeholders+`)`,
+		args...)
 	if err != nil {
 		return CleanupResult{}, fmt.Errorf("deleting orphan torrents: %w", err)
 	}
 	deleted, _ := res.RowsAffected()
 
-	// Also drop any torrent_tags rows that referenced these hashes —
+	// Also drop any torrent_tags rows that referenced these hashes -
 	// foreign-key cleanup that would otherwise leave dangling tags.
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM torrent_tags WHERE info_hash = ANY($1)`,
-		pgArray(confirmed)); err != nil {
+		`DELETE FROM torrent_tags WHERE info_hash IN (`+placeholders+`)`,
+		args...); err != nil {
 		return CleanupResult{}, fmt.Errorf("deleting orphan torrent_tags: %w", err)
 	}
 
@@ -164,31 +159,69 @@ func (o *OrphanTorrents) Cleanup(ctx context.Context, req CleanupRequest) (Clean
 }
 
 // captureTorrentsToHistory snapshots torrents rows into cleanup_history
-// within the supplied transaction. row_to_json over the full row keeps
-// us schema-agnostic — new columns added in future migrations get
-// captured automatically. Returns the inserted history-row IDs so the
-// caller can hand them back to the frontend for an undo affordance.
+// within the supplied transaction. Rather than Postgres' row_to_json,
+// we scan all columns generically via rows.Columns() and marshal in Go -
+// stays schema-agnostic across future migrations.
 func captureTorrentsToHistory(ctx context.Context, tx *sql.Tx, diagnosticName string, hashes []string) ([]int64, error) {
+	if len(hashes) == 0 {
+		return nil, nil
+	}
+	args := stringsToAny(hashes)
+	placeholders := inPlaceholders(len(hashes))
+
 	rows, err := tx.QueryContext(ctx, `
-		SELECT info_hash, row_to_json(t)::jsonb::text
-		  FROM torrents t
-		 WHERE info_hash = ANY($1)
-	`, pgArray(hashes))
+		SELECT * FROM torrents
+		 WHERE info_hash IN (`+placeholders+`)
+	`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("snapshotting torrents: %w", err)
 	}
 	defer rows.Close()
 
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("reading column metadata: %w", err)
+	}
+	pkIdx := -1
+	for i, name := range cols {
+		if name == "info_hash" {
+			pkIdx = i
+			break
+		}
+	}
+	if pkIdx < 0 {
+		return nil, fmt.Errorf("torrents schema missing info_hash column")
+	}
+
 	var pks []string
 	var jsons [][]byte
 	for rows.Next() {
-		var pk string
-		var rowJSON []byte
-		if err := rows.Scan(&pk, &rowJSON); err != nil {
+		raw := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range raw {
+			ptrs[i] = &raw[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
 			return nil, fmt.Errorf("scanning torrents snapshot: %w", err)
 		}
+		obj := make(map[string]any, len(cols))
+		for i, name := range cols {
+			v := raw[i]
+			// SQLite TEXT scans into []byte under modernc; normalise to
+			// string so the JSON encoding is human-readable rather than
+			// base64.
+			if b, ok := v.([]byte); ok {
+				v = string(b)
+			}
+			obj[name] = v
+		}
+		pk, _ := obj["info_hash"].(string)
+		buf, err := json.Marshal(obj)
+		if err != nil {
+			return nil, fmt.Errorf("marshalling torrent row: %w", err)
+		}
 		pks = append(pks, pk)
-		jsons = append(jsons, rowJSON)
+		jsons = append(jsons, buf)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -204,16 +237,19 @@ func captureTorrentsToHistory(ctx context.Context, tx *sql.Tx, diagnosticName st
 	return ids, nil
 }
 
-// pgArray formats a string slice as a Postgres ARRAY[…] literal. Using
-// pq's Array type would be cleaner, but haul's existing code uses raw
-// SQL throughout — match the pattern.
-func pgArray(s []string) string {
-	if len(s) == 0 {
-		return "{}"
+// inPlaceholders returns "?,?,?" with n entries, for use in an IN clause.
+func inPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
 	}
-	parts := make([]string, len(s))
-	for i, x := range s {
-		parts[i] = `"` + strings.ReplaceAll(x, `"`, `\"`) + `"`
+	return strings.Repeat("?,", n-1) + "?"
+}
+
+// stringsToAny converts a string slice to []any for ExecContext varargs.
+func stringsToAny(s []string) []any {
+	out := make([]any, len(s))
+	for i, v := range s {
+		out[i] = v
 	}
-	return "{" + strings.Join(parts, ",") + "}"
+	return out
 }

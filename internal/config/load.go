@@ -19,7 +19,6 @@ import (
 const (
 	DefaultHost = "0.0.0.0"
 	DefaultPort = 8484
-	DefaultDB   = "postgres"
 	DefaultLog  = "info"
 	DefaultFmt  = "json"
 )
@@ -39,8 +38,6 @@ func Load(cfgFile string) (*Config, error) {
 
 	v.SetDefault("server.host", DefaultHost)
 	v.SetDefault("server.port", DefaultPort)
-	v.SetDefault("database.driver", DefaultDB)
-	v.SetDefault("database.dsn", "")
 	v.SetDefault("log.level", DefaultLog)
 	v.SetDefault("log.format", DefaultFmt)
 	v.SetDefault("torrent.listen_port", 6881)
@@ -110,8 +107,6 @@ func Load(cfgFile string) (*Config, error) {
 
 	_ = v.BindEnv("auth.api_key", envPrefix+"_AUTH_API_KEY")
 	_ = v.BindEnv("database.path", envPrefix+"_DATABASE_PATH")
-	_ = v.BindEnv("database.dsn", envPrefix+"_DATABASE_DSN")
-	_ = v.BindEnv("database.password_file", envPrefix+"_DATABASE_PASSWORD_FILE")
 	_ = v.BindEnv("pulse.url", envPrefix+"_PULSE_URL")
 	_ = v.BindEnv("pulse.api_key", envPrefix+"_PULSE_API_KEY")
 	_ = v.BindEnv("pulse.api_key_file", envPrefix+"_PULSE_API_KEY_FILE")
@@ -135,12 +130,14 @@ func Load(cfgFile string) (*Config, error) {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
 
-	if cfg.Database.PasswordFile != "" {
-		merged, err := secretfile.OverrideDSNPassword(cfg.Database.DSN.Value(), cfg.Database.PasswordFile)
-		if err != nil {
-			return nil, fmt.Errorf("applying database password file: %w", err)
+	if cfg.Database.Path == "" {
+		if info, err := os.Stat("/config"); err == nil && info.IsDir() {
+			cfg.Database.Path = "/config/haul.db"
+		} else if home, _ := os.UserHomeDir(); home != "" {
+			cfg.Database.Path = filepath.Join(home, ".config", "haul", "haul.db")
+		} else {
+			cfg.Database.Path = "/config/haul.db"
 		}
-		cfg.Database.DSN = Secret(merged)
 	}
 
 	if cfg.Pulse.APIKeyFile != "" {

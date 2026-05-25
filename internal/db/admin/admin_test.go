@@ -37,24 +37,22 @@ func TestParseMode(t *testing.T) {
 	}
 }
 
-func TestPgArray(t *testing.T) {
+func TestInPlaceholders(t *testing.T) {
 	cases := []struct {
 		name string
-		in   []string
+		n    int
 		want string
 	}{
-		{"empty", []string{}, "{}"},
-		{"single", []string{"abc"}, `{"abc"}`},
-		{"multiple", []string{"abc", "def"}, `{"abc","def"}`},
-		{"with-quote", []string{`abc"xyz`}, `{"abc\"xyz"}`},
-		{"hex hashes", []string{"6eefc7ca2759951a4f79de65825f80f48040d6e0", "4980ae45cac9000000000000000000000000aaaa"},
-			`{"6eefc7ca2759951a4f79de65825f80f48040d6e0","4980ae45cac9000000000000000000000000aaaa"}`},
+		{"zero", 0, ""},
+		{"one", 1, "?"},
+		{"two", 2, "?,?"},
+		{"five", 5, "?,?,?,?,?"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := pgArray(tc.in)
+			got := inPlaceholders(tc.n)
 			if got != tc.want {
-				t.Errorf("pgArray(%v) = %q; want %q", tc.in, got, tc.want)
+				t.Errorf("inPlaceholders(%d) = %q; want %q", tc.n, got, tc.want)
 			}
 		})
 	}

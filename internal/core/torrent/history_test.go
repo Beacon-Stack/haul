@@ -29,12 +29,12 @@ func TestBuildHistoryQuery_AllFiltersJoinWithAnd(t *testing.T) {
 
 	// Every supplied filter must show up as a WHERE clause.
 	for _, want := range []string{
-		"requester_service = $1",
-		"info_hash = $2",
-		"requester_episode_id = $3",
-		"requester_tmdb_id = $4",
-		"requester_season = $5",
-		"requester_episode = $6",
+		"requester_service = ?",
+		"info_hash = ?",
+		"requester_episode_id = ?",
+		"requester_tmdb_id = ?",
+		"requester_season = ?",
+		"requester_episode = ?",
 		"removed_at IS NULL", // implicit when IncludeRemoved=false
 	} {
 		if !strings.Contains(q, want) {
@@ -120,7 +120,7 @@ func TestBuildHistoryQuery_MovieFilter(t *testing.T) {
 		Service: "prism",
 		MovieID: "27b54ce3-1bbf-4df8-8f93-e002e52f19c7",
 	})
-	if !strings.Contains(q, "requester_movie_id = $2") {
+	if !strings.Contains(q, "requester_movie_id = ?") {
 		t.Errorf("movie filter not in query:\n%s", q)
 	}
 	if len(args) != 2 || args[0] != "prism" || args[1] != "27b54ce3-1bbf-4df8-8f93-e002e52f19c7" {
