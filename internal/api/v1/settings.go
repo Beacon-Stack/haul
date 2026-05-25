@@ -121,7 +121,7 @@ func RegisterSettingsRoutes(api huma.API, db *sql.DB, session *torrent.Session) 
 		Tags:        []string{"Settings"},
 	}, func(_ context.Context, input *setSettingsInput) (*settingsOutput, error) {
 		for k, v := range input.Body.Settings {
-			_, err := db.Exec(`INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, k, v)
+			_, err := db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, k, v)
 			if err != nil {
 				return nil, huma.Error500InternalServerError(err.Error())
 			}

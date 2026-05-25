@@ -56,7 +56,7 @@ func (s *Session) AdaptiveBandwidth() {
 	entries := make([]entry, 0, len(downloading))
 	for i, mt := range downloading {
 		var prio int
-		_ = s.db.QueryRow(`SELECT priority FROM torrents WHERE info_hash = $1`, hashes[i]).Scan(&prio)
+		_ = s.db.QueryRow(`SELECT priority FROM torrents WHERE info_hash = ?`, hashes[i]).Scan(&prio)
 
 		stats := mt.t.Stats()
 		actual := stats.ConnStats.BytesReadData.Int64()
@@ -111,17 +111,17 @@ func (s *Session) SetDeadline(hash string, deadline *time.Time) error {
 	}
 
 	if deadline == nil {
-		_, err := s.db.Exec(`UPDATE torrents SET deadline = NULL WHERE info_hash = $1`, hash)
+		_, err := s.db.Exec(`UPDATE torrents SET deadline = NULL WHERE info_hash = ?`, hash)
 		return err
 	}
-	_, err := s.db.Exec(`UPDATE torrents SET deadline = $1 WHERE info_hash = $2`, *deadline, hash)
+	_, err := s.db.Exec(`UPDATE torrents SET deadline = ? WHERE info_hash = ?`, *deadline, hash)
 	return err
 }
 
 // GetDeadline returns the deadline for a torrent.
 func (s *Session) GetDeadline(hash string) (*time.Time, error) {
 	var deadline *time.Time
-	err := s.db.QueryRow(`SELECT deadline FROM torrents WHERE info_hash = $1`, hash).Scan(&deadline)
+	err := s.db.QueryRow(`SELECT deadline FROM torrents WHERE info_hash = ?`, hash).Scan(&deadline)
 	if err != nil {
 		return nil, err
 	}

@@ -25,18 +25,20 @@ func TestBuildListQuery_DefaultsAndShape(t *testing.T) {
 	}
 }
 
-func TestBuildListQuery_SearchInjectsParameterizedILike(t *testing.T) {
+func TestBuildListQuery_SearchInjectsParameterizedLike(t *testing.T) {
 	listSQL, _, args := buildListQuery(ListFilter{Search: "ubuntu"})
-	if !strings.Contains(listSQL, "ILIKE") {
-		t.Fatalf("expected ILIKE clause, got: %s", listSQL)
+	if !strings.Contains(listSQL, "LIKE") {
+		t.Fatalf("expected LIKE clause, got: %s", listSQL)
 	}
 	// Must use a placeholder, NOT inline the search string into SQL —
 	// that would be an injection vector.
 	if strings.Contains(listSQL, "ubuntu") {
 		t.Fatalf("search term must be parameterised, found inline in: %s", listSQL)
 	}
-	if len(args) != 1 || args[0] != "%ubuntu%" {
-		t.Fatalf("expected single arg %%ubuntu%%, got %v", args)
+	// Positional ? placeholders can't reuse args; the search term is
+	// bound twice (once per LIKE expression).
+	if len(args) != 2 || args[0] != "%ubuntu%" || args[1] != "%ubuntu%" {
+		t.Fatalf("expected two %%ubuntu%% args, got %v", args)
 	}
 }
 

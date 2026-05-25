@@ -45,7 +45,7 @@ func (s *Service) List() ([]Category, error) {
 // Get returns a single category by name.
 func (s *Service) Get(name string) (*Category, error) {
 	var c Category
-	err := s.db.QueryRow(`SELECT name, save_path, upload_limit, download_limit FROM categories WHERE name = $1`, name).
+	err := s.db.QueryRow(`SELECT name, save_path, upload_limit, download_limit FROM categories WHERE name = ?`, name).
 		Scan(&c.Name, &c.SavePath, &c.UploadLimit, &c.DownloadLimit)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("category not found: %s", name)
@@ -58,7 +58,7 @@ func (s *Service) Get(name string) (*Category, error) {
 
 // Create creates a new category.
 func (s *Service) Create(c Category) error {
-	_, err := s.db.Exec(`INSERT INTO categories (name, save_path, upload_limit, download_limit) VALUES ($1, $2, $3, $4)`,
+	_, err := s.db.Exec(`INSERT INTO categories (name, save_path, upload_limit, download_limit) VALUES (?, ?, ?, ?)`,
 		c.Name, c.SavePath, c.UploadLimit, c.DownloadLimit)
 	if err != nil {
 		return fmt.Errorf("creating category: %w", err)
@@ -68,7 +68,7 @@ func (s *Service) Create(c Category) error {
 
 // Update updates an existing category.
 func (s *Service) Update(name string, c Category) error {
-	res, err := s.db.Exec(`UPDATE categories SET save_path = $1, upload_limit = $2, download_limit = $3 WHERE name = $4`,
+	res, err := s.db.Exec(`UPDATE categories SET save_path = ?, upload_limit = ?, download_limit = ? WHERE name = ?`,
 		c.SavePath, c.UploadLimit, c.DownloadLimit, name)
 	if err != nil {
 		return fmt.Errorf("updating category: %w", err)
@@ -82,7 +82,7 @@ func (s *Service) Update(name string, c Category) error {
 
 // Delete deletes a category. Torrents in this category are not removed.
 func (s *Service) Delete(name string) error {
-	res, err := s.db.Exec(`DELETE FROM categories WHERE name = $1`, name)
+	res, err := s.db.Exec(`DELETE FROM categories WHERE name = ?`, name)
 	if err != nil {
 		return fmt.Errorf("deleting category: %w", err)
 	}

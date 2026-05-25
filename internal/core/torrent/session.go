@@ -942,7 +942,7 @@ func (s *Session) persistTrackerChange(hash string, mt *managedTorrent) {
 		s.logger.Error("failed to encode metainfo after tracker change", "hash", hash, "error", err)
 		return
 	}
-	if _, err := s.db.Exec(`UPDATE torrents SET torrent_data = $1 WHERE info_hash = $2`, buf.Bytes(), hash); err != nil {
+	if _, err := s.db.Exec(`UPDATE torrents SET torrent_data = ? WHERE info_hash = ?`, buf.Bytes(), hash); err != nil {
 		s.logger.Error("failed to persist tracker change", "hash", hash, "error", err)
 	}
 }
@@ -1123,10 +1123,10 @@ func (s *Session) Resume(hash string) error {
 	s.mu.Unlock()
 
 	if wasStalled && s.db != nil {
-		if _, err := s.db.Exec(`UPDATE torrents SET stalled_at = NULL WHERE info_hash = $1`, hash); err != nil {
+		if _, err := s.db.Exec(`UPDATE torrents SET stalled_at = NULL WHERE info_hash = ?`, hash); err != nil {
 			s.logger.Warn("resume: clear stalled_at failed", "hash", hash, "error", err)
 		}
-		if _, err := s.db.Exec(`DELETE FROM torrent_tags WHERE info_hash = $1 AND tag = 'stalled'`, hash); err != nil {
+		if _, err := s.db.Exec(`DELETE FROM torrent_tags WHERE info_hash = ? AND tag = 'stalled'`, hash); err != nil {
 			s.logger.Warn("resume: drop stalled tag failed", "hash", hash, "error", err)
 		}
 	}
@@ -1866,7 +1866,7 @@ func (s *Session) persistTorrent(hash string, mt *managedTorrent) {
 	// SetMetadata (separate write path).
 	_, err := s.db.Exec(`
 		INSERT INTO torrents (info_hash, name, save_path, category, added_at, sequential, resolution)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (info_hash) DO UPDATE SET
 			name = EXCLUDED.name,
 			save_path = EXCLUDED.save_path,
@@ -1883,7 +1883,7 @@ func (s *Session) persistTorrent(hash string, mt *managedTorrent) {
 
 	// Persist tags.
 	for _, tag := range mt.tags {
-		_, _ = s.db.Exec(`INSERT INTO torrent_tags (info_hash, tag) VALUES ($1, $2) ON CONFLICT DO NOTHING`, hash, tag)
+		_, _ = s.db.Exec(`INSERT INTO torrent_tags (info_hash, tag) VALUES (?, ?) ON CONFLICT DO NOTHING`, hash, tag)
 	}
 }
 
@@ -1892,7 +1892,7 @@ func (s *Session) updateTorrentMeta(hash, name string, size int64) {
 	if s.db == nil {
 		return
 	}
-	_, err := s.db.Exec(`UPDATE torrents SET name = $1, size_bytes = $2, resolution = $3 WHERE info_hash = $4`, name, size, parseResolution(name), hash)
+	_, err := s.db.Exec(`UPDATE torrents SET name = ?, size_bytes = ?, resolution = ? WHERE info_hash = ?`, name, size, parseResolution(name), hash)
 	if err != nil {
 		s.logger.Error("failed to update torrent meta", "hash", hash, "error", err)
 	}
@@ -1910,7 +1910,7 @@ func (s *Session) saveTorrentData(hash string, t *lt.Torrent) {
 		s.logger.Error("failed to encode torrent metainfo", "hash", hash, "error", err)
 		return
 	}
-	_, err := s.db.Exec(`UPDATE torrents SET torrent_data = $1 WHERE info_hash = $2`, buf.Bytes(), hash)
+	_, err := s.db.Exec(`UPDATE torrents SET torrent_data = ? WHERE info_hash = ?`, buf.Bytes(), hash)
 	if err != nil {
 		s.logger.Error("failed to save torrent data", "hash", hash, "error", err)
 	}
@@ -1928,7 +1928,7 @@ func (s *Session) ExportTorrent(hash string) ([]byte, error) {
 		return nil, fmt.Errorf("database not configured")
 	}
 	var data []byte
-	err := s.db.QueryRow(`SELECT torrent_data FROM torrents WHERE info_hash = $1`, hash).Scan(&data)
+	err := s.db.QueryRow(`SELECT torrent_data FROM torrents WHERE info_hash = ?`, hash).Scan(&data)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("torrent not found: %s", hash)
 	}
@@ -1946,7 +1946,7 @@ func (s *Session) markCompleted(hash string, completedAt time.Time) {
 	if s.db == nil {
 		return
 	}
-	_, err := s.db.Exec(`UPDATE torrents SET completed_at = $1 WHERE info_hash = $2`, completedAt, hash)
+	_, err := s.db.Exec(`UPDATE torrents SET completed_at = ? WHERE info_hash = ?`, completedAt, hash)
 	if err != nil {
 		s.logger.Error("failed to mark torrent completed", "hash", hash, "error", err)
 	}
@@ -1970,8 +1970,8 @@ func (s *Session) deleteTorrent(hash string) {
 	if s.db == nil {
 		return
 	}
-	_, _ = s.db.Exec(`DELETE FROM torrent_tags WHERE info_hash = $1`, hash)
-	_, _ = s.db.Exec(`UPDATE torrents SET removed_at = NOW() WHERE info_hash = $1 AND removed_at IS NULL`, hash)
+	_, _ = s.db.Exec(`DELETE FROM torrent_tags WHERE info_hash = ?`, hash)
+	_, _ = s.db.Exec(`UPDATE torrents SET removed_at = ? WHERE info_hash = ? AND removed_at IS NULL`, time.Now().UTC().Format(time.RFC3339), hash)
 }
 
 // restoreFromDB loads previously saved torrents from the database.
@@ -2039,7 +2039,7 @@ func (s *Session) restoreFromDB() error {
 		isStalled := stalledAt != nil
 
 		var tags []string
-		if rows2, terr := s.db.Query(`SELECT tag FROM torrent_tags WHERE info_hash = $1`, hash); terr == nil {
+		if rows2, terr := s.db.Query(`SELECT tag FROM torrent_tags WHERE info_hash = ?`, hash); terr == nil {
 			for rows2.Next() {
 				var tag string
 				if scanErr := rows2.Scan(&tag); scanErr == nil {

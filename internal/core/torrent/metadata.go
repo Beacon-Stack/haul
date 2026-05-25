@@ -57,15 +57,15 @@ func (s *Session) SetMetadata(hash string, meta RequesterMetadata) error {
 	}
 
 	_, err = s.db.Exec(`UPDATE torrents SET
-		metadata             = $1,
-		requester_service    = $2,
-		requester_movie_id   = $3,
-		requester_series_id  = $4,
-		requester_episode_id = $5,
-		requester_tmdb_id    = $6,
-		requester_season     = $7,
-		requester_episode    = $8
-	WHERE info_hash = $9`,
+		metadata             = ?,
+		requester_service    = ?,
+		requester_movie_id   = ?,
+		requester_series_id  = ?,
+		requester_episode_id = ?,
+		requester_tmdb_id    = ?,
+		requester_season     = ?,
+		requester_episode    = ?
+	WHERE info_hash = ?`,
 		string(data),
 		meta.Requester,
 		meta.MovieID,
@@ -82,7 +82,7 @@ func (s *Session) SetMetadata(hash string, meta RequesterMetadata) error {
 // GetMetadata retrieves the requester metadata for a torrent.
 func (s *Session) GetMetadata(hash string) (*RequesterMetadata, error) {
 	var raw string
-	err := s.db.QueryRow(`SELECT metadata FROM torrents WHERE info_hash = $1`, hash).Scan(&raw)
+	err := s.db.QueryRow(`SELECT metadata FROM torrents WHERE info_hash = ?`, hash).Scan(&raw)
 	if err != nil {
 		return nil, fmt.Errorf("getting metadata: %w", err)
 	}

@@ -64,13 +64,14 @@ func buildListQuery(f ListFilter) (listSQL, countSQL string, args []any) {
 		clauses = append(clauses, fmt.Sprintf(clause, len(args)))
 	}
 
-	// Search across the fields the user can see in the table. ILIKE is
-	// fine here — the torrents table is small enough that a sequential
-	// scan with a substring match is sub-millisecond.
+	// Search across the fields the user can see in the table. SQLite's
+	// LIKE is ASCII-case-insensitive by default — equivalent to Postgres
+	// ILIKE for the search shapes we expect here (names + category
+	// strings, both ASCII in practice). Positional `?` placeholders can't
+	// reuse a single arg, so the search term is bound twice.
 	if s := strings.TrimSpace(f.Search); s != "" {
-		args = append(args, "%"+s+"%")
-		idx := len(args)
-		clauses = append(clauses, fmt.Sprintf("(name ILIKE $%d OR category ILIKE $%d)", idx, idx))
+		args = append(args, "%"+s+"%", "%"+s+"%")
+		clauses = append(clauses, "(name LIKE ? OR category LIKE ?)")
 	}
 
 	switch f.Status {
@@ -83,7 +84,7 @@ func buildListQuery(f ListFilter) (listSQL, countSQL string, args []any) {
 	case "", "all":
 		// no filter — show everything
 	default:
-		add("removed_at IS NULL AND $%d = $%d", f.Status) // unreachable; default is "all"
+		add("removed_at IS NULL AND ? = ?", f.Status) // unreachable; default is "all"
 	}
 
 	where := ""
@@ -210,9 +211,9 @@ func ListEvents(ctx context.Context, db *sql.DB, infoHash string, limit int) ([]
 	rows, err := db.QueryContext(ctx, `
 		SELECT id, info_hash, event_type, occurred_at, payload
 		FROM torrent_events
-		WHERE info_hash = $1
+		WHERE info_hash = ?
 		ORDER BY occurred_at DESC, id DESC
-		LIMIT $2`, infoHash, limit)
+		LIMIT ?`, infoHash, limit)
 	if err != nil {
 		return nil, fmt.Errorf("event list: %w", err)
 	}

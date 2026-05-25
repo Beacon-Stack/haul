@@ -82,31 +82,31 @@ func buildHistoryQuery(f HistoryFilter) (sql string, args []any) {
 	var clauses []string
 	add := func(clause string, arg any) {
 		args = append(args, arg)
-		clauses = append(clauses, fmt.Sprintf(clause, len(args))) // $1, $2 …
+		clauses = append(clauses, fmt.Sprintf(clause, len(args))) // ?, ? …
 	}
 	if f.Service != "" {
-		add("requester_service = $%d", f.Service)
+		add("requester_service = ?", f.Service)
 	}
 	if f.InfoHash != "" {
-		add("info_hash = $%d", f.InfoHash)
+		add("info_hash = ?", f.InfoHash)
 	}
 	if f.MovieID != "" {
-		add("requester_movie_id = $%d", f.MovieID)
+		add("requester_movie_id = ?", f.MovieID)
 	}
 	if f.SeriesID != "" {
-		add("requester_series_id = $%d", f.SeriesID)
+		add("requester_series_id = ?", f.SeriesID)
 	}
 	if f.EpisodeID != "" {
-		add("requester_episode_id = $%d", f.EpisodeID)
+		add("requester_episode_id = ?", f.EpisodeID)
 	}
 	if f.TMDBID > 0 {
-		add("requester_tmdb_id = $%d", f.TMDBID)
+		add("requester_tmdb_id = ?", f.TMDBID)
 	}
 	if f.Season > 0 {
-		add("requester_season = $%d", f.Season)
+		add("requester_season = ?", f.Season)
 	}
 	if f.Episode > 0 {
-		add("requester_episode = $%d", f.Episode)
+		add("requester_episode = ?", f.Episode)
 	}
 	if !f.IncludeRemoved {
 		clauses = append(clauses, "removed_at IS NULL")
