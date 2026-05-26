@@ -1981,65 +1981,83 @@ func (s *Session) restoreFromDB() error {
 	if s.db == nil {
 		return nil
 	}
+
+	// torrentRow buffers one row of the outer SELECT. We materialize
+	// every row before processing so the connection holding the cursor
+	// is released — restore needs to run nested queries (torrent_tags,
+	// deleteTorrent) and the DB pool is sized to 1 connection.
+	type torrentRow struct {
+		hash, name, savePath, category, requester string
+		addedAt                                   time.Time
+		completedAt, stalledAt                    *time.Time
+		torrentData                               []byte
+	}
+
 	rows, err := s.db.Query(`SELECT info_hash, name, save_path, category, added_at, torrent_data, completed_at, stalled_at, requester_service FROM torrents`)
 	if err != nil {
 		return fmt.Errorf("querying torrents: %w", err)
 	}
-	defer rows.Close()
 
-	var restored, cleaned int
+	var pending []torrentRow
 	for rows.Next() {
-		var hash, name, savePath, category, requester string
+		var r torrentRow
 		// Time columns are TEXT in the SQLite schema (RFC3339 strings
 		// written by Go); scan into nullable strings and parse rather
 		// than relying on database/sql's *time.Time mapping.
 		var addedAtStr string
-		var torrentData []byte
 		var completedAtStr, stalledAtStr sql.NullString
-		if err := rows.Scan(&hash, &name, &savePath, &category, &addedAtStr, &torrentData, &completedAtStr, &stalledAtStr, &requester); err != nil {
+		if err := rows.Scan(&r.hash, &r.name, &r.savePath, &r.category, &addedAtStr, &r.torrentData, &completedAtStr, &stalledAtStr, &r.requester); err != nil {
 			s.logger.Warn("skipping torrent row", "error", err)
 			continue
 		}
-		addedAt, _ := time.Parse(time.RFC3339, addedAtStr)
-		var completedAt, stalledAt *time.Time
+		r.addedAt, _ = time.Parse(time.RFC3339, addedAtStr)
 		if completedAtStr.Valid {
 			if t, err := time.Parse(time.RFC3339, completedAtStr.String); err == nil {
-				completedAt = &t
+				r.completedAt = &t
 			}
 		}
 		if stalledAtStr.Valid {
 			if t, err := time.Parse(time.RFC3339, stalledAtStr.String); err == nil {
-				stalledAt = &t
+				r.stalledAt = &t
 			}
 		}
+		pending = append(pending, r)
+	}
+	rowsErr := rows.Err()
+	rows.Close()
+	if rowsErr != nil {
+		return rowsErr
+	}
 
+	var restored, cleaned int
+	for _, r := range pending {
 		// No .torrent data saved — can't restore without re-fetching metadata.
-		if len(torrentData) == 0 {
-			s.logger.Info("removing torrent without resume data", "hash", hash, "name", name)
-			s.deleteTorrent(hash)
+		if len(r.torrentData) == 0 {
+			s.logger.Info("removing torrent without resume data", "hash", r.hash, "name", r.name)
+			s.deleteTorrent(r.hash)
 			cleaned++
 			continue
 		}
 
 		// Already completed and paused — clean up unless files are still present.
-		if completedAt != nil {
-			s.logger.Info("skipping completed torrent", "hash", hash, "name", name)
+		if r.completedAt != nil {
+			s.logger.Info("skipping completed torrent", "hash", r.hash, "name", r.name)
 			continue
 		}
 
 		// Restore from saved .torrent data — no peer/DHT metadata fetch needed.
-		mi, parseErr := metainfo.Load(bytes_reader(torrentData))
+		mi, parseErr := metainfo.Load(bytes_reader(r.torrentData))
 		if parseErr != nil {
-			s.logger.Warn("failed to parse saved torrent data, removing", "hash", hash, "error", parseErr)
-			s.deleteTorrent(hash)
+			s.logger.Warn("failed to parse saved torrent data, removing", "hash", r.hash, "error", parseErr)
+			s.deleteTorrent(r.hash)
 			cleaned++
 			continue
 		}
 
 		t, addErr := s.client.AddTorrent(mi)
 		if addErr != nil {
-			s.logger.Warn("failed to re-add torrent, removing", "hash", hash, "error", addErr)
-			s.deleteTorrent(hash)
+			s.logger.Warn("failed to re-add torrent, removing", "hash", r.hash, "error", addErr)
+			s.deleteTorrent(r.hash)
 			cleaned++
 			continue
 		}
@@ -2051,10 +2069,10 @@ func (s *Session) restoreFromDB() error {
 		// the "needs attention" rail. tags are loaded from the
 		// torrent_tags table below to preserve the auto-applied
 		// 'stalled' tag (and any user-applied tags).
-		isStalled := stalledAt != nil
+		isStalled := r.stalledAt != nil
 
 		var tags []string
-		if rows2, terr := s.db.Query(`SELECT tag FROM torrent_tags WHERE info_hash = ?`, hash); terr == nil {
+		if rows2, terr := s.db.Query(`SELECT tag FROM torrent_tags WHERE info_hash = ?`, r.hash); terr == nil {
 			for rows2.Next() {
 				var tag string
 				if scanErr := rows2.Scan(&tag); scanErr == nil {
@@ -2067,16 +2085,16 @@ func (s *Session) restoreFromDB() error {
 		mt := &managedTorrent{
 			t:         t,
 			paused:    isStalled,
-			category:  category,
-			savePath:  savePath,
+			category:  r.category,
+			savePath:  r.savePath,
 			tags:      tags,
-			addedAt:   addedAt,
-			stalledAt: stalledAt,
-			requester: requester,
+			addedAt:   r.addedAt,
+			stalledAt: r.stalledAt,
+			requester: r.requester,
 		}
 
 		s.mu.Lock()
-		s.torrents[hash] = mt
+		s.torrents[r.hash] = mt
 		s.mu.Unlock()
 
 		// verifyOnStart=true — re-hash the .part file on disk so we
@@ -2084,13 +2102,13 @@ func (s *Session) restoreFromDB() error {
 		// bolt completion store. Protects against the "everything
 		// restarts from 0% after a restart" class of bugs where bolt
 		// state gets out of sync with the file on disk.
-		go s.waitAndStart(mt, hash, isStalled, false, true)
+		go s.waitAndStart(mt, r.hash, isStalled, false, true)
 		restored++
-		s.logger.Info("restored torrent", "hash", hash, "name", name)
+		s.logger.Info("restored torrent", "hash", r.hash, "name", r.name)
 	}
 
 	if restored > 0 || cleaned > 0 {
 		s.logger.Info("torrent restore complete", "restored", restored, "cleaned", cleaned)
 	}
-	return rows.Err()
+	return nil
 }
