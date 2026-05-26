@@ -1990,12 +1990,27 @@ func (s *Session) restoreFromDB() error {
 	var restored, cleaned int
 	for rows.Next() {
 		var hash, name, savePath, category, requester string
-		var addedAt time.Time
+		// Time columns are TEXT in the SQLite schema (RFC3339 strings
+		// written by Go); scan into nullable strings and parse rather
+		// than relying on database/sql's *time.Time mapping.
+		var addedAtStr string
 		var torrentData []byte
-		var completedAt, stalledAt *time.Time
-		if err := rows.Scan(&hash, &name, &savePath, &category, &addedAt, &torrentData, &completedAt, &stalledAt, &requester); err != nil {
+		var completedAtStr, stalledAtStr sql.NullString
+		if err := rows.Scan(&hash, &name, &savePath, &category, &addedAtStr, &torrentData, &completedAtStr, &stalledAtStr, &requester); err != nil {
 			s.logger.Warn("skipping torrent row", "error", err)
 			continue
+		}
+		addedAt, _ := time.Parse(time.RFC3339, addedAtStr)
+		var completedAt, stalledAt *time.Time
+		if completedAtStr.Valid {
+			if t, err := time.Parse(time.RFC3339, completedAtStr.String); err == nil {
+				completedAt = &t
+			}
+		}
+		if stalledAtStr.Valid {
+			if t, err := time.Parse(time.RFC3339, stalledAtStr.String); err == nil {
+				stalledAt = &t
+			}
 		}
 
 		// No .torrent data saved — can't restore without re-fetching metadata.
