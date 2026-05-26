@@ -1,6 +1,7 @@
 package torrent
 
 import (
+	"database/sql"
 	"fmt"
 	"sort"
 	"time"
@@ -119,13 +120,23 @@ func (s *Session) SetDeadline(hash string, deadline *time.Time) error {
 }
 
 // GetDeadline returns the deadline for a torrent.
+//
+// deadline is TEXT (RFC3339) in the SQLite schema; scan as nullable string
+// and parse on the way out so callers still see *time.Time.
 func (s *Session) GetDeadline(hash string) (*time.Time, error) {
-	var deadline *time.Time
-	err := s.db.QueryRow(`SELECT deadline FROM torrents WHERE info_hash = ?`, hash).Scan(&deadline)
+	var deadlineStr sql.NullString
+	err := s.db.QueryRow(`SELECT deadline FROM torrents WHERE info_hash = ?`, hash).Scan(&deadlineStr)
 	if err != nil {
 		return nil, err
 	}
-	return deadline, nil
+	if !deadlineStr.Valid {
+		return nil, nil
+	}
+	t, err := time.Parse(time.RFC3339, deadlineStr.String)
+	if err != nil {
+		return nil, nil
+	}
+	return &t, nil
 }
 
 // EffectivePriority returns the priority adjusted for deadline urgency.

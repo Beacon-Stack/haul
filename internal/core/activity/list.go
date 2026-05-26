@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // Item is a single row in the activity list. One row per torrent,
@@ -160,8 +159,10 @@ func List(ctx context.Context, db *sql.DB, f ListFilter) ([]Item, int64, error) 
 	out := make([]Item, 0)
 	for rows.Next() {
 		var it Item
-		var addedAt time.Time
-		var completedAt, removedAt *time.Time
+		// TIMESTAMPTZ → TEXT in SQLite; scan as strings, RFC3339-parse if
+		// needed downstream. NULL columns come through as !Valid.
+		var addedAt string
+		var completedAt, removedAt sql.NullString
 		if err := rows.Scan(
 			&it.InfoHash, &it.Name, &it.Category, &it.SavePath, &it.SizeBytes, &it.Resolution,
 			&addedAt, &completedAt, &removedAt,
@@ -170,12 +171,12 @@ func List(ctx context.Context, db *sql.DB, f ListFilter) ([]Item, int64, error) 
 		); err != nil {
 			return nil, 0, fmt.Errorf("activity scan: %w", err)
 		}
-		it.AddedAt = addedAt.UTC().Format(time.RFC3339)
-		if completedAt != nil {
-			it.CompletedAt = completedAt.UTC().Format(time.RFC3339)
+		it.AddedAt = addedAt
+		if completedAt.Valid {
+			it.CompletedAt = completedAt.String
 		}
-		if removedAt != nil {
-			it.RemovedAt = removedAt.UTC().Format(time.RFC3339)
+		if removedAt.Valid {
+			it.RemovedAt = removedAt.String
 		}
 		out = append(out, it)
 	}
@@ -222,12 +223,13 @@ func ListEvents(ctx context.Context, db *sql.DB, infoHash string, limit int) ([]
 	out := make([]EventRow, 0)
 	for rows.Next() {
 		var r EventRow
-		var occurred time.Time
+		// occurred_at is TEXT (RFC3339) in SQLite.
+		var occurred string
 		var payload []byte
 		if err := rows.Scan(&r.ID, &r.InfoHash, &r.EventType, &occurred, &payload); err != nil {
 			return nil, fmt.Errorf("event scan: %w", err)
 		}
-		r.OccurredAt = occurred.UTC().Format(time.RFC3339)
+		r.OccurredAt = occurred
 		// Parse the JSONB payload back into a generic map so it ships
 		// to the client as a real object, not a base64 blob. Failure
 		// here means the column got corrupted somehow — return the raw

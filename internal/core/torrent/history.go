@@ -2,9 +2,9 @@ package torrent
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // HistoryRecord is the lookup-API view of a torrent's persistent
@@ -149,8 +149,9 @@ func (s *Session) LookupHistory(ctx context.Context, f HistoryFilter) ([]History
 	out := make([]HistoryRecord, 0)
 	for rows.Next() {
 		var r HistoryRecord
-		var addedAt time.Time
-		var completedAt, removedAt *time.Time
+		// TIMESTAMPTZ → TEXT in SQLite; scan as strings.
+		var addedAt string
+		var completedAt, removedAt sql.NullString
 		if err := rows.Scan(
 			&r.InfoHash, &r.Name, &r.SavePath, &r.Category,
 			&addedAt, &completedAt, &removedAt,
@@ -160,12 +161,12 @@ func (s *Session) LookupHistory(ctx context.Context, f HistoryFilter) ([]History
 		); err != nil {
 			return nil, fmt.Errorf("scan history row: %w", err)
 		}
-		r.AddedAt = addedAt.UTC().Format(time.RFC3339)
-		if completedAt != nil {
-			r.CompletedAt = completedAt.UTC().Format(time.RFC3339)
+		r.AddedAt = addedAt
+		if completedAt.Valid {
+			r.CompletedAt = completedAt.String
 		}
-		if removedAt != nil {
-			r.RemovedAt = removedAt.UTC().Format(time.RFC3339)
+		if removedAt.Valid {
+			r.RemovedAt = removedAt.String
 		}
 		out = append(out, r)
 	}
