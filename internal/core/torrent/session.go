@@ -1989,11 +1989,16 @@ func (s *Session) restoreFromDB() error {
 	type torrentRow struct {
 		hash, name, savePath, category, requester string
 		addedAt                                   time.Time
-		completedAt, stalledAt                    *time.Time
+		completedAt, stalledAt, removedAt         *time.Time
 		torrentData                               []byte
 	}
 
-	rows, err := s.db.Query(`SELECT info_hash, name, save_path, category, added_at, torrent_data, completed_at, stalled_at, requester_service FROM torrents`)
+	// removed_at IS NULL: soft-deleted torrents stay in the table for
+	// history (LookupHistory), but must never be re-added to the engine —
+	// otherwise a cancelled download reappears on the dashboard after a
+	// restart. The per-row guard below is a defensive backstop in case a
+	// future caller drops this predicate.
+	rows, err := s.db.Query(`SELECT info_hash, name, save_path, category, added_at, torrent_data, completed_at, stalled_at, requester_service, removed_at FROM torrents WHERE removed_at IS NULL`)
 	if err != nil {
 		return fmt.Errorf("querying torrents: %w", err)
 	}
@@ -2005,8 +2010,8 @@ func (s *Session) restoreFromDB() error {
 		// written by Go); scan into nullable strings and parse rather
 		// than relying on database/sql's *time.Time mapping.
 		var addedAtStr string
-		var completedAtStr, stalledAtStr sql.NullString
-		if err := rows.Scan(&r.hash, &r.name, &r.savePath, &r.category, &addedAtStr, &r.torrentData, &completedAtStr, &stalledAtStr, &r.requester); err != nil {
+		var completedAtStr, stalledAtStr, removedAtStr sql.NullString
+		if err := rows.Scan(&r.hash, &r.name, &r.savePath, &r.category, &addedAtStr, &r.torrentData, &completedAtStr, &stalledAtStr, &r.requester, &removedAtStr); err != nil {
 			s.logger.Warn("skipping torrent row", "error", err)
 			continue
 		}
@@ -2021,6 +2026,11 @@ func (s *Session) restoreFromDB() error {
 				r.stalledAt = &t
 			}
 		}
+		if removedAtStr.Valid {
+			if t, err := time.Parse(time.RFC3339, removedAtStr.String); err == nil {
+				r.removedAt = &t
+			}
+		}
 		pending = append(pending, r)
 	}
 	rowsErr := rows.Err()
@@ -2031,6 +2041,14 @@ func (s *Session) restoreFromDB() error {
 
 	var restored, cleaned int
 	for _, r := range pending {
+		// Defensive backstop: the SELECT already filters removed_at IS NULL,
+		// but never re-add a soft-deleted torrent to the engine even if that
+		// predicate is ever dropped — a resurrected delete is the exact bug
+		// this guard exists to prevent.
+		if r.removedAt != nil {
+			continue
+		}
+
 		// No .torrent data saved — can't restore without re-fetching metadata.
 		if len(r.torrentData) == 0 {
 			s.logger.Info("removing torrent without resume data", "hash", r.hash, "name", r.name)
