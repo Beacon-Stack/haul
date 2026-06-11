@@ -4,8 +4,6 @@ import { apiFetch } from "@/api/client";
 export interface Category {
   name: string;
   save_path: string;
-  upload_limit: number;
-  download_limit: number;
 }
 
 export function useCategories() {
