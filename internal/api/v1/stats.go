@@ -29,16 +29,7 @@ type statsOutput struct {
 	Body *statsBody
 }
 
-type appVersionBody struct {
-	Version string `json:"version"`
-	AppName string `json:"app_name"`
-}
-
-type appVersionOutput struct {
-	Body *appVersionBody
-}
-
-// RegisterStatsRoutes registers stats and app info endpoints.
+// RegisterStatsRoutes registers the session statistics endpoint.
 func RegisterStatsRoutes(api huma.API, session *torrent.Session) {
 	huma.Register(api, huma.Operation{
 		OperationID: "get-stats",
@@ -61,19 +52,6 @@ func RegisterStatsRoutes(api huma.API, session *torrent.Session) {
 			SeedsConnected:  ts.TotalSeeds,
 			AltSpeedActive:  session.IsAltSpeedActive(),
 			ArchivedCount:   session.GetArchivedCount(),
-		}}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-version",
-		Method:      http.MethodGet,
-		Path:        "/api/v1/app/version",
-		Summary:     "Application version",
-		Tags:        []string{"App"},
-	}, func(_ context.Context, _ *struct{}) (*appVersionOutput, error) {
-		return &appVersionOutput{Body: &appVersionBody{
-			Version: version.Version,
-			AppName: version.AppName,
 		}}, nil
 	})
 }
