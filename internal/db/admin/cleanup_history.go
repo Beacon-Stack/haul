@@ -13,23 +13,23 @@ import (
 // generically and only diagnostics that own a specific source_table know
 // how to deserialize it for restore.
 type HistoryEntry struct {
-	ID              int64           `json:"id"`
-	Diagnostic      string          `json:"diagnostic"`
-	SourceTable     string          `json:"source_table"`
-	SourcePK        string          `json:"source_pk"`
-	RowData         json.RawMessage `json:"row_data"`
-	DeletedAt       time.Time       `json:"deleted_at"`
-	RequestID       string          `json:"request_id"`
-	ActorKeyPrefix  string          `json:"actor_key_prefix"`
+	ID             int64           `json:"id"`
+	Diagnostic     string          `json:"diagnostic"`
+	SourceTable    string          `json:"source_table"`
+	SourcePK       string          `json:"source_pk"`
+	RowData        json.RawMessage `json:"row_data"`
+	DeletedAt      time.Time       `json:"deleted_at"`
+	RequestID      string          `json:"request_id"`
+	ActorKeyPrefix string          `json:"actor_key_prefix"`
 }
 
 // HistoryListFilter narrows the cleanup_history query. All fields are
 // optional; zero values disable the filter.
 type HistoryListFilter struct {
-	Diagnostic   string
-	SourceTable  string
-	Limit        int
-	Offset       int
+	Diagnostic  string
+	SourceTable string
+	Limit       int
+	Offset      int
 }
 
 // CaptureContext is the metadata passed to InsertCleanupHistory so the

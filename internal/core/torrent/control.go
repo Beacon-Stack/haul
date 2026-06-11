@@ -15,10 +15,10 @@ import (
 
 // FileInfo describes a file within a torrent.
 type FileInfo struct {
-	Index    int    `json:"index"`
-	Path     string `json:"path"`
-	Size     int64  `json:"size"`
-	Priority string `json:"priority"` // "skip", "normal", "high"
+	Index    int     `json:"index"`
+	Path     string  `json:"path"`
+	Size     int64   `json:"size"`
+	Priority string  `json:"priority"` // "skip", "normal", "high"
 	Progress float64 `json:"progress"`
 }
 

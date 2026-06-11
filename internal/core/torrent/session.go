@@ -76,27 +76,27 @@ const (
 
 // Info is the external representation of a torrent.
 type Info struct {
-	InfoHash     string    `json:"info_hash"`
-	Name         string    `json:"name"`
-	Status       Status    `json:"status"`
-	SavePath     string    `json:"save_path"`
-	Category     string    `json:"category"`
-	Tags         []string  `json:"tags"`
-	Size         int64     `json:"size"`
-	Downloaded   int64     `json:"downloaded"`
-	Uploaded     int64     `json:"uploaded"`
-	Progress     float64   `json:"progress"`
-	DownloadRate int64     `json:"download_rate"`
-	UploadRate   int64     `json:"upload_rate"`
-	Seeds        int       `json:"seeds"`
-	Peers        int       `json:"peers"`
-	SeedRatio    float64   `json:"seed_ratio"`
-	ETA          int64     `json:"eta"`
-	AddedAt      time.Time `json:"added_at"`
+	InfoHash     string     `json:"info_hash"`
+	Name         string     `json:"name"`
+	Status       Status     `json:"status"`
+	SavePath     string     `json:"save_path"`
+	Category     string     `json:"category"`
+	Tags         []string   `json:"tags"`
+	Size         int64      `json:"size"`
+	Downloaded   int64      `json:"downloaded"`
+	Uploaded     int64      `json:"uploaded"`
+	Progress     float64    `json:"progress"`
+	DownloadRate int64      `json:"download_rate"`
+	UploadRate   int64      `json:"upload_rate"`
+	Seeds        int        `json:"seeds"`
+	Peers        int        `json:"peers"`
+	SeedRatio    float64    `json:"seed_ratio"`
+	ETA          int64      `json:"eta"`
+	AddedAt      time.Time  `json:"added_at"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
-	ContentPath  string    `json:"content_path"`
-	Sequential   bool      `json:"sequential"`
-	Requester    string    `json:"requester,omitempty"` // "pilot" | "prism" | "manual" | ""
+	ContentPath  string     `json:"content_path"`
+	Sequential   bool       `json:"sequential"`
+	Requester    string     `json:"requester,omitempty"` // "pilot" | "prism" | "manual" | ""
 
 	// Stalled is true when the backend's stall detector classifies this
 	// torrent as inactive — see internal/core/torrent/stall.go for the
@@ -258,7 +258,7 @@ type managedTorrent struct {
 	// ("pilot", "prism", "manual", or ""). Set by SetMetadata and on
 	// restore from DB. Surfaced on Info so the UI can gate features
 	// like "Re-search via Pilot" without a separate API call.
-	requester string
+	requester      string
 	tags           []string
 	addedAt        time.Time
 	savePath       string

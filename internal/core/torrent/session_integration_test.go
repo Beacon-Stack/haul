@@ -229,4 +229,3 @@ func TestSessionIntegration_DownloadFromPeer(t *testing.T) {
 
 	t.Logf("downloaded %d bytes from local seeder; sha1=%s", completed, hex.EncodeToString(mi.HashInfoBytes().Bytes()))
 }
-

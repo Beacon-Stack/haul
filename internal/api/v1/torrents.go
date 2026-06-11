@@ -59,11 +59,11 @@ func validateAddTorrentURI(uri string) error {
 
 type addTorrentInput struct {
 	Body struct {
-		URI      string                    `json:"uri"                          doc:"Magnet link or HTTP URL to .torrent file"`
-		Category string                    `json:"category,omitempty"  required:"false" doc:"Category to assign"`
-		SavePath string                    `json:"save_path,omitempty" required:"false" doc:"Override default save path"`
-		Tags     []string                  `json:"tags,omitempty"      required:"false" doc:"Tags to assign"`
-		Paused   bool                      `json:"paused,omitempty"    required:"false" doc:"Start in paused state"`
+		URI      string                     `json:"uri"                          doc:"Magnet link or HTTP URL to .torrent file"`
+		Category string                     `json:"category,omitempty"  required:"false" doc:"Category to assign"`
+		SavePath string                     `json:"save_path,omitempty" required:"false" doc:"Override default save path"`
+		Tags     []string                   `json:"tags,omitempty"      required:"false" doc:"Tags to assign"`
+		Paused   bool                       `json:"paused,omitempty"    required:"false" doc:"Start in paused state"`
 		Metadata *torrent.RequesterMetadata `json:"metadata,omitempty"  required:"false" doc:"Media context from requesting service"`
 	}
 }

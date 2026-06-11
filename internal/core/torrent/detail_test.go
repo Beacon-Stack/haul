@@ -301,7 +301,7 @@ func TestSession_Trackers_FromMetainfo(t *testing.T) {
 	s := newTestSession(t)
 	announceList := [][]string{
 		{"udp://tracker.example.com:1337", "udp://backup.example.com:1337"}, // tier 0
-		{"http://fallback.example.com/announce"},                             // tier 1
+		{"http://fallback.example.com/announce"},                            // tier 1
 	}
 	hash, _ := addTestTorrent(t, s, announceList)
 
