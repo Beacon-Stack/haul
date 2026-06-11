@@ -60,7 +60,7 @@ func RegisterStatsRoutes(api huma.API, session *torrent.Session) {
 			PeersConnected:  ts.TotalPeers,
 			SeedsConnected:  ts.TotalSeeds,
 			AltSpeedActive:  session.IsAltSpeedActive(),
-		ArchivedCount:   session.GetArchivedCount(),
+			ArchivedCount:   session.GetArchivedCount(),
 		}}, nil
 	})
 

@@ -38,8 +38,10 @@ func NewOrphanTorrents(db *sql.DB, session SessionRemover) *OrphanTorrents {
 	return &OrphanTorrents{db: db, session: session}
 }
 
-func (o *OrphanTorrents) Name() string        { return "orphan_torrents" }
-func (o *OrphanTorrents) Description() string { return "Torrent rows in DB but not tracked by the in-memory engine" }
+func (o *OrphanTorrents) Name() string { return "orphan_torrents" }
+func (o *OrphanTorrents) Description() string {
+	return "Torrent rows in DB but not tracked by the in-memory engine"
+}
 
 func (o *OrphanTorrents) Detect(ctx context.Context) ([]Row, error) {
 	live := o.session.LiveHashes()

@@ -8,16 +8,16 @@ import (
 // Values are loaded from config.yaml and can be overridden by
 // HAUL_* environment variables (e.g. HAUL_SERVER_PORT=8484).
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Log      LogConfig      `mapstructure:"log"`
-	Auth     AuthConfig     `mapstructure:"auth"`
-	Torrent   TorrentConfig       `mapstructure:"torrent"`
-	Schedule  SpeedScheduleConfig `mapstructure:"schedule"`
-	Webhooks  []WebhookConfig     `mapstructure:"webhooks"`
-	Pulse     PulseConfig         `mapstructure:"pulse"`
-	Admin     AdminConfig         `mapstructure:"admin"`
-	Cleanup   CleanupConfig       `mapstructure:"cleanup"`
+	Server   ServerConfig        `mapstructure:"server"`
+	Database DatabaseConfig      `mapstructure:"database"`
+	Log      LogConfig           `mapstructure:"log"`
+	Auth     AuthConfig          `mapstructure:"auth"`
+	Torrent  TorrentConfig       `mapstructure:"torrent"`
+	Schedule SpeedScheduleConfig `mapstructure:"schedule"`
+	Webhooks []WebhookConfig     `mapstructure:"webhooks"`
+	Pulse    PulseConfig         `mapstructure:"pulse"`
+	Admin    AdminConfig         `mapstructure:"admin"`
+	Cleanup  CleanupConfig       `mapstructure:"cleanup"`
 
 	// ConfigFile is the path of the config file that was loaded, if any.
 	ConfigFile string `mapstructure:"-"`

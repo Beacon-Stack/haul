@@ -12,20 +12,20 @@ import (
 type StallLevel int
 
 const (
-	StallNone          StallLevel = 0
-	StallLevel1        StallLevel = 1 // No activity for stall_timeout — reannounce
-	StallLevel2        StallLevel = 2 // No activity for 2x stall_timeout — force DHT
-	StallLevel3        StallLevel = 3 // No activity for 5x stall_timeout — notify ecosystem
-	StallNoPeersEver   StallLevel = 4 // Never got a single peer — classic "dead torrent" signal
+	StallNone        StallLevel = 0
+	StallLevel1      StallLevel = 1 // No activity for stall_timeout — reannounce
+	StallLevel2      StallLevel = 2 // No activity for 2x stall_timeout — force DHT
+	StallLevel3      StallLevel = 3 // No activity for 5x stall_timeout — notify ecosystem
+	StallNoPeersEver StallLevel = 4 // Never got a single peer — classic "dead torrent" signal
 )
 
 // Stall reason strings. These show up in the event bus and in the HTTP
 // API response for /torrents/{hash}/stall — Pilot/Prism use them to decide
 // whether to blocklist the release.
 const (
-	ReasonNoPeersEver   = "no_peers_ever"  // pre-metadata, no peer in the firstPeerTimeout window
-	ReasonNoPeers       = "no_peers"       // had peers at some point, now has none + no data for stall_timeout
-	ReasonNoSeeders     = "no_seeders"     // has peers but no seeds, no data for stall_timeout
+	ReasonNoPeersEver    = "no_peers_ever" // pre-metadata, no peer in the firstPeerTimeout window
+	ReasonNoPeers        = "no_peers"      // had peers at some point, now has none + no data for stall_timeout
+	ReasonNoSeeders      = "no_seeders"    // has peers but no seeds, no data for stall_timeout
 	ReasonNoDataReceived = "no_data_received"
 )
 
@@ -309,7 +309,7 @@ func (s *Session) CheckStalls(ctx context.Context) {
 					// Pilot stallwatcher contract — true now means
 					// "auto-paused" (semantically the same: needs
 					// attention) rather than "dropped from engine".
-					"archived":  true,
+					"archived":   true,
 					"stalled_at": stalledAt.Format(time.RFC3339),
 				},
 			})

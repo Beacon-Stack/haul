@@ -12,12 +12,12 @@ func TestParseMode(t *testing.T) {
 		want    CleanupMode
 		wantErr bool
 	}{
-		{"", ModeSoft, false},        // default
+		{"", ModeSoft, false}, // default
 		{"soft", ModeSoft, false},
 		{"hard", ModeHard, false},
-		{"SOFT", "", true},           // case-sensitive
-		{"permanent", "", true},      // unknown
-		{"yes", "", true},            // unknown
+		{"SOFT", "", true},      // case-sensitive
+		{"permanent", "", true}, // unknown
+		{"yes", "", true},       // unknown
 	}
 	for _, tc := range cases {
 		got, err := ParseMode(tc.in)
@@ -89,7 +89,9 @@ func TestRegistry_GetReturnsNilForUnknown(t *testing.T) {
 // that don't actually need to detect or clean anything.
 type fakeDiagnostic struct{ name string }
 
-func (f *fakeDiagnostic) Name() string                                                  { return f.name }
-func (f *fakeDiagnostic) Description() string                                           { return "" }
-func (f *fakeDiagnostic) Detect(_ context.Context) ([]Row, error)                       { return nil, nil }
-func (f *fakeDiagnostic) Cleanup(_ context.Context, _ CleanupRequest) (CleanupResult, error) { return CleanupResult{}, nil }
+func (f *fakeDiagnostic) Name() string                            { return f.name }
+func (f *fakeDiagnostic) Description() string                     { return "" }
+func (f *fakeDiagnostic) Detect(_ context.Context) ([]Row, error) { return nil, nil }
+func (f *fakeDiagnostic) Cleanup(_ context.Context, _ CleanupRequest) (CleanupResult, error) {
+	return CleanupResult{}, nil
+}

@@ -40,7 +40,7 @@ type researchOutput struct {
 	Body struct {
 		// Mirrors Pilot/Prism's autoSearchResultBody so the frontend
 		// renders the same shape regardless of which sibling answered.
-		Result       string `json:"result"`                  // "grabbed" | "no_match"
+		Result       string `json:"result"` // "grabbed" | "no_match"
 		ReleaseTitle string `json:"release_title,omitempty"`
 		Reason       string `json:"reason,omitempty"`
 	}
