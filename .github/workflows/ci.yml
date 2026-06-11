@@ -72,7 +72,9 @@ jobs:
           cache: true
 
       - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+        # Pinned: an unpinned @latest means a lint release can break CI on
+        # an unrelated day. Bump deliberately.
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.64.8
 
       - name: Run golangci-lint
         # haul's package graph (anacrolix/torrent + dht + DHT transitive deps)

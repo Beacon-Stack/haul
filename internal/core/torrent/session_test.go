@@ -34,17 +34,9 @@ func TestStatusConstants(t *testing.T) {
 	}
 }
 
-func TestStallLevelConstants(t *testing.T) {
-	if StallNone >= StallLevel1 {
-		t.Error("StallNone should be less than StallLevel1")
-	}
-	if StallLevel1 >= StallLevel2 {
-		t.Error("StallLevel1 should be less than StallLevel2")
-	}
-	if StallLevel2 >= StallLevel3 {
-		t.Error("StallLevel2 should be less than StallLevel3")
-	}
-}
+// Removed: TestStallLevelConstants — asserted the ordering of constants
+// defined two lines from each other. classify_stalled_test.go covers the
+// behavior the levels drive.
 
 // Removed: TestTransferStatsZeroValue, TestAddRequestValidation,
 // TestFileInfoPriority, TestHealthReportFields — all asserted Go

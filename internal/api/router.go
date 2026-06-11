@@ -74,7 +74,11 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	r := chi.NewRouter()
 
 	r.Use(middleware.SecurityHeaders)
-	r.Use(middleware.MaxRequestBodySize(50 << 20)) // 50 MiB for .torrent uploads
+	// Transport-level body cap. Sized above the add-torrent operation's
+	// own 16 MiB MaxBodyBytes (torrents.go), which in turn sits above the
+	// 10 MiB decoded-payload limit (maxTorrentFileBytes) — each layer only
+	// needs to be generous enough not to shadow the one below it.
+	r.Use(middleware.MaxRequestBodySize(50 << 20))
 	r.Use(middleware.RequestLogger(cfg.Logger))
 	r.Use(middleware.Recovery(cfg.Logger))
 
