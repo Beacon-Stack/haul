@@ -47,8 +47,8 @@ type CaptureContext struct {
 // it when hard-deleting. Returns the inserted IDs in the same order as
 // the input pairs (caller may want to log them).
 //
-// rowJSON should be the JSONB-encoded full row at deletion time. The
-// caller is responsible for encoding (typically `SELECT row_to_json(t)::jsonb FROM <table> t WHERE pk = ANY(?)`).
+// rowJSON should be the JSON-encoded full row at deletion time; the
+// caller is responsible for encoding (see captureTorrentsToHistory).
 func InsertCleanupHistory(ctx context.Context, tx *sql.Tx, capture CaptureContext, sourcePKs []string, rowsJSON [][]byte) ([]int64, error) {
 	if len(sourcePKs) != len(rowsJSON) {
 		return nil, fmt.Errorf("InsertCleanupHistory: pks=%d rows=%d (must match)", len(sourcePKs), len(rowsJSON))

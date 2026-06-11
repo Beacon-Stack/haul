@@ -16,6 +16,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -207,13 +209,6 @@ type Session struct {
 	bus    *events.Bus
 	logger *slog.Logger
 	cfg    config.TorrentConfig
-
-	// pieceCompletion is the persistent BoltDB-backed completion tracker.
-	// Without this, torrents restart from 0% on every container restart
-	// because anacrolix's default in-memory map doesn't survive restarts
-	// even though the downloaded bytes are still on disk.
-	// Closed by Session.Close().
-	pieceCompletion storage.PieceCompletion
 
 	// startedAt is when NewSession returned successfully. Used as a grace
 	// period for stall detection — we don't want to flag torrents as dead
@@ -533,7 +528,6 @@ func NewSession(cfg config.TorrentConfig, db *sql.DB, bus *events.Bus, logger *s
 		startedAt:          time.Now(),
 		pauseOnComplete:    cfg.PauseOnComplete,
 		maxActiveDownloads: cfg.MaxActiveDownloads,
-		pieceCompletion:    pieceCompletion,
 		downloadLimiter:    downloadLimiter,
 		uploadLimiter:      uploadLimiter,
 	}
@@ -599,7 +593,7 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 	var err error
 
 	if len(req.File) > 0 {
-		mi, parseErr := metainfo.Load(bytes_reader(req.File))
+		mi, parseErr := metainfo.Load(bytes.NewReader(req.File))
 		if parseErr != nil {
 			s.logger.Warn("add torrent rejected", "source", source, "reason", "parse failed", "error", parseErr)
 			return nil, fmt.Errorf("parsing torrent file: %w", parseErr)
@@ -618,12 +612,12 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 		} else if strings.HasPrefix(req.URI, "data:application/x-bittorrent;base64,") {
 			// Base64-encoded .torrent file from Prism/Pilot plugin or the UI upload path.
 			b64 := req.URI[len("data:application/x-bittorrent;base64,"):]
-			torrentBytes, decErr := base64Decode(b64)
+			torrentBytes, decErr := base64.StdEncoding.DecodeString(b64)
 			if decErr != nil {
 				s.logger.Warn("add torrent rejected", "source", source, "reason", "base64 decode failed", "error", decErr)
 				return nil, fmt.Errorf("decoding base64 torrent: %w", decErr)
 			}
-			mi, parseErr := metainfo.Load(bytes_reader(torrentBytes))
+			mi, parseErr := metainfo.Load(bytes.NewReader(torrentBytes))
 			if parseErr != nil {
 				s.logger.Warn("add torrent rejected", "source", source, "reason", "parse failed", "error", parseErr)
 				return nil, fmt.Errorf("parsing torrent from base64 data: %w", parseErr)
@@ -1118,7 +1112,7 @@ func (s *Session) Resume(hash string) error {
 	wasStalled := mt.stalledAt != nil
 	mt.stalledAt = nil
 	if wasStalled {
-		mt.tags = removeString(mt.tags, "stalled")
+		mt.tags = slices.DeleteFunc(mt.tags, func(t string) bool { return t == "stalled" })
 	}
 	s.mu.Unlock()
 
@@ -1139,14 +1133,10 @@ func (s *Session) Resume(hash string) error {
 	return nil
 }
 
-// Close shuts down the torrent engine. anacrolix's fileClientImpl.Close()
-// already closes the piece-completion store (see anacrolix storage/
-// file-client.go Close), so we do NOT close s.pieceCompletion separately
-// here — that would be a double-close and the second one errors with
-// "database not open" on bolt. The pieceCompletion field on Session exists
-// for the NewSession fallback path where we need to pass the store into
-// NewFileWithCompletion; once it's handed off to anacrolix, anacrolix owns
-// its lifecycle.
+// Close shuts down the torrent engine. The piece-completion store is owned
+// by anacrolix once handed to it in NewSession — fileClientImpl.Close()
+// closes it, so we must not close it again here (a double-close errors with
+// "database not open" on bolt).
 func (s *Session) Close() {
 	s.client.Close()
 }
@@ -1435,7 +1425,7 @@ func (s *Session) addFromURL(ctx context.Context, torrentURL string) (*lt.Torren
 		return s.client.AddMagnet(strings.TrimSpace(string(data)))
 	}
 
-	mi, err := metainfo.Load(bytes_reader(data))
+	mi, err := metainfo.Load(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("parsing torrent from %s: %w", torrentURL, err)
 	}
@@ -1797,12 +1787,6 @@ func (s *Session) monitorCompletion(mt *managedTorrent, hash string) {
 			s.logger.Info("torrent completed", "hash", hash, "name", mt.t.Name())
 			now := time.Now().UTC()
 
-			s.mu.Lock()
-			if m, ok := s.torrents[hash]; ok {
-				_ = m // completed_at tracked via DB
-			}
-			s.mu.Unlock()
-
 			s.markCompleted(hash, now)
 
 			// Rename files if configured and metadata is available.
@@ -2064,7 +2048,7 @@ func (s *Session) restoreFromDB() error {
 		}
 
 		// Restore from saved .torrent data — no peer/DHT metadata fetch needed.
-		mi, parseErr := metainfo.Load(bytes_reader(r.torrentData))
+		mi, parseErr := metainfo.Load(bytes.NewReader(r.torrentData))
 		if parseErr != nil {
 			s.logger.Warn("failed to parse saved torrent data, removing", "hash", r.hash, "error", parseErr)
 			s.deleteTorrent(r.hash)

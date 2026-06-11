@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/beacon-stack/haul/internal/config"
@@ -156,57 +157,14 @@ func discoverAPIKey(logger *slog.Logger) string {
 		return ""
 	}
 
-	for _, line := range splitLines(string(data)) {
-		trimmed := trimLeftSpace(line)
-		if len(trimmed) > 8 && trimmed[:8] == "api_key:" {
-			value := trimSpace(trimmed[8:])
-			value = trimQuotes(value)
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimLeft(line, " \t")
+		if value, ok := strings.CutPrefix(trimmed, "api_key:"); ok {
+			value = strings.Trim(strings.TrimSpace(value), `"'`)
 			if value != "" && value != "***" {
 				return value
 			}
 		}
 	}
 	return ""
-}
-
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			lines = append(lines, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
-}
-
-func trimLeftSpace(s string) string {
-	for i := 0; i < len(s); i++ {
-		if s[i] != ' ' && s[i] != '\t' {
-			return s[i:]
-		}
-	}
-	return ""
-}
-
-func trimSpace(s string) string {
-	start, end := 0, len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t' || s[end-1] == '\r') {
-		end--
-	}
-	return s[start:end]
-}
-
-func trimQuotes(s string) string {
-	if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
-		return s[1 : len(s)-1]
-	}
-	return s
 }

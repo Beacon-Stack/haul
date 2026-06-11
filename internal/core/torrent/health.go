@@ -127,6 +127,8 @@ func (s *Session) GetHealth() *HealthReport {
 	// Disk space for download directory.
 	diskFree, diskTotal := getDiskSpace(s.cfg.DownloadDir)
 
+	vpnActive, vpnIface, externalIP := GetVPNStatus()
+
 	return &HealthReport{
 		ActiveDownloads: activeDown,
 		ActiveUploads:   activeUp,
@@ -138,9 +140,9 @@ func (s *Session) GetHealth() *HealthReport {
 		StalledCount:    stalledCount,
 		EngineStatus:    "healthy",
 		PeersConnected:  totalPeers,
-		VPNActive:       func() bool { a, _, _ := GetVPNStatus(); return a }(),
-		VPNInterface:    func() string { _, i, _ := GetVPNStatus(); return i }(),
-		ExternalIP:      func() string { _, _, ip := GetVPNStatus(); return ip }(),
+		VPNActive:       vpnActive,
+		VPNInterface:    vpnIface,
+		ExternalIP:      externalIP,
 	}
 }
 

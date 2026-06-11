@@ -3,6 +3,7 @@ package activity
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -229,7 +230,7 @@ func ListEvents(ctx context.Context, db *sql.DB, infoHash string, limit int) ([]
 		// string so the caller can at least see what's there.
 		if len(payload) > 0 {
 			var v any
-			if err := unmarshalPayload(payload, &v); err == nil {
+			if err := json.Unmarshal(payload, &v); err == nil {
 				r.Payload = v
 			} else {
 				r.Payload = string(payload)

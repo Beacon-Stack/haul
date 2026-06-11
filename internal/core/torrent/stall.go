@@ -3,6 +3,7 @@ package torrent
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/beacon-stack/haul/internal/events"
@@ -280,7 +281,7 @@ func (s *Session) CheckStalls(ctx context.Context) {
 				// Auto-add the 'stalled' tag if it isn't already present.
 				// The tag is the user-facing label for the dashboard
 				// rail + the existing tag filter chip.
-				if !containsString(m.tags, "stalled") {
+				if !slices.Contains(m.tags, "stalled") {
 					m.tags = append(m.tags, "stalled")
 				}
 			}
@@ -495,28 +496,4 @@ func nameOrEmpty(mt *managedTorrent) string {
 		return ""
 	}
 	return mt.t.Name()
-}
-
-// containsString reports whether xs contains s. Cheap O(n) — used only
-// on tags slices, which are typically a handful of entries.
-func containsString(xs []string, s string) bool {
-	for _, x := range xs {
-		if x == s {
-			return true
-		}
-	}
-	return false
-}
-
-// removeString returns a copy of xs without any occurrence of s. Used
-// when un-stalling a torrent (Resume) — the auto-applied tag has to
-// come off so the row stops appearing in the "needs attention" filter.
-func removeString(xs []string, s string) []string {
-	out := xs[:0]
-	for _, x := range xs {
-		if x != s {
-			out = append(out, x)
-		}
-	}
-	return out
 }

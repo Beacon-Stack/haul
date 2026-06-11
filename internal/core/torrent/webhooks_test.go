@@ -113,7 +113,7 @@ func TestWebhookDispatcherNoFilterSendsAll(t *testing.T) {
 
 	d.HandleEvent(context.Background(), events.Event{Type: events.TypeTorrentAdded})
 	d.HandleEvent(context.Background(), events.Event{Type: events.TypeTorrentCompleted})
-	d.HandleEvent(context.Background(), events.Event{Type: events.TypeSpeedUpdate})
+	d.HandleEvent(context.Background(), events.Event{Type: events.TypeTorrentStalled})
 
 	time.Sleep(500 * time.Millisecond)
 

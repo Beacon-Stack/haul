@@ -161,9 +161,9 @@ func (o *OrphanTorrents) Cleanup(ctx context.Context, req CleanupRequest) (Clean
 }
 
 // captureTorrentsToHistory snapshots torrents rows into cleanup_history
-// within the supplied transaction. Rather than Postgres' row_to_json,
-// we scan all columns generically via rows.Columns() and marshal in Go -
-// stays schema-agnostic across future migrations.
+// within the supplied transaction. Columns are scanned generically via
+// rows.Columns() and marshalled in Go, so it stays schema-agnostic
+// across future migrations.
 func captureTorrentsToHistory(ctx context.Context, tx *sql.Tx, diagnosticName string, hashes []string) ([]int64, error) {
 	if len(hashes) == 0 {
 		return nil, nil

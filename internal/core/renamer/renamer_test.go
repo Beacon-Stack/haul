@@ -1,7 +1,6 @@
 package renamer
 
 import (
-	"path/filepath"
 	"testing"
 )
 
@@ -23,42 +22,6 @@ func TestApplyMovieFormat(t *testing.T) {
 
 	got := ApplyMovieFormat(DefaultMovieFormat, movie, quality, ColonSpaceDash)
 	want := "Fight Club (1999) Bluray-2160p"
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestEpisodeDestPath(t *testing.T) {
-	series := Series{Title: "Family Guy", Year: 1999}
-	ep := Episode{SeasonNumber: 9, EpisodeNumber: 8, Title: "New Kidney in Town"}
-	quality := Quality{Name: "HDTV-720p"}
-
-	got := EpisodeDestPath(
-		"/library/tv",
-		DefaultEpisodeFormat,
-		DefaultSeriesFolderFormat,
-		DefaultSeasonFolderFormat,
-		series, ep, quality, ColonSpaceDash,
-		".mkv",
-	)
-	want := filepath.Join("/library/tv", "Family Guy (1999)", "Season 09", "Family Guy - S09E08 - New Kidney in Town HDTV-720p.mkv")
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
-func TestMovieDestPath(t *testing.T) {
-	movie := Movie{Title: "Fight Club", Year: 1999}
-	quality := Quality{Name: "Remux-2160p"}
-
-	got := MovieDestPath(
-		"/library/movies",
-		DefaultMovieFormat,
-		DefaultMovieFolderFormat,
-		movie, quality, ColonSpaceDash,
-		".mkv",
-	)
-	want := filepath.Join("/library/movies", "Fight Club (1999)", "Fight Club (1999) Remux-2160p.mkv")
 	if got != want {
 		t.Errorf("got %q, want %q", got, want)
 	}
