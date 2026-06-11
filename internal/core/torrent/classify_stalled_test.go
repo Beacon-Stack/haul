@@ -51,7 +51,7 @@ func TestClassifyStalled(t *testing.T) {
 		for _, s := range []Status{StatusSeeding, StatusCompleted, StatusPaused, StatusQueued, StatusFailed} {
 			p := base
 			p.status = s
-			if classifyStalled(p) {
+			if classifyStall(p).Stalled {
 				t.Errorf("status=%q was classified stalled; only downloading should be", s)
 			}
 		}
@@ -65,7 +65,7 @@ func TestClassifyStalled(t *testing.T) {
 		p.hasInfo = false
 		p.bytesMissing = 0
 		p.addedAt = justStarted // < firstPeerTimeout — rule 3 does NOT fire
-		if classifyStalled(p) {
+		if classifyStall(p).Stalled {
 			t.Error("pre-metadata fresh add was stalled; should not classify until firstPeerTimeout elapses")
 		}
 	})
@@ -84,7 +84,7 @@ func TestClassifyStalled(t *testing.T) {
 		p.bytesMissing = 0
 		// addedAt is `wayBack` (1h ago) — past the 3-min firstPeerTimeout.
 		p.firstPeerAt = nil
-		if !classifyStalled(p) {
+		if !classifyStall(p).Stalled {
 			t.Error("REGRESSION: pre-metadata dead magnet was NOT stalled — " +
 				"the dashboard Stalled filter pill will read 0 again. " +
 				"See classify_stalled_test.go header comment.")
@@ -101,7 +101,7 @@ func TestClassifyStalled(t *testing.T) {
 		p.bytesMissing = 0
 		fp := now.Add(-10 * time.Minute)
 		p.firstPeerAt = &fp
-		if classifyStalled(p) {
+		if classifyStall(p).Stalled {
 			t.Error("bytesMissing=0 was stalled; completed work can't stall")
 		}
 	})
@@ -125,7 +125,7 @@ func TestClassifyStalled(t *testing.T) {
 			lastActivityAt:   time.Time{},                // never observed activity yet
 			stallTimeout:     2 * time.Minute,
 		}
-		if classifyStalled(p) {
+		if classifyStall(p).Stalled {
 			t.Fatal("REGRESSION: a freshly-restarted session reported stalled within the startup grace. " +
 				"This means torrentInfo() isn't honoring sessionStartupGrace the way CheckStalls does — " +
 				"users see red bars on every restart until peers reconnect. See classify_stalled_test.go.")
@@ -144,7 +144,7 @@ func TestClassifyStalled(t *testing.T) {
 			lastActivityAt:   time.Time{},
 			stallTimeout:     2 * time.Minute,
 		}
-		if !classifyStalled(p) {
+		if !classifyStall(p).Stalled {
 			t.Error("expected stalled=true for a torrent past grace + past firstPeerTimeout with no peers ever")
 		}
 	})
@@ -163,7 +163,7 @@ func TestClassifyStalled(t *testing.T) {
 			lastActivityAt:   time.Time{},
 			stallTimeout:     2 * time.Minute,
 		}
-		if classifyStalled(p) {
+		if classifyStall(p).Stalled {
 			t.Error("expected stalled=false for a fresh add still inside firstPeerTimeout")
 		}
 	})
@@ -176,7 +176,7 @@ func TestClassifyStalled(t *testing.T) {
 		fp := now.Add(-10 * time.Minute)
 		p.firstPeerAt = &fp
 		p.lastActivityAt = now.Add(-5 * time.Second)
-		if classifyStalled(p) {
+		if classifyStall(p).Stalled {
 			t.Error("expected stalled=false with activity 5s ago")
 		}
 	})
@@ -188,7 +188,7 @@ func TestClassifyStalled(t *testing.T) {
 		// Set firstPeerAt so we don't trip rule 5 by accident.
 		fp := now.Add(-3 * time.Minute)
 		p.firstPeerAt = &fp
-		if !classifyStalled(p) {
+		if !classifyStall(p).Stalled {
 			t.Error("expected stalled=true with lastActivityAt older than stallTimeout")
 		}
 	})
@@ -202,7 +202,7 @@ func TestClassifyStalled(t *testing.T) {
 		// firstPeerAt older than stallTimeout so we fall into rule 6 path.
 		fp := now.Add(-4 * time.Minute)
 		p.firstPeerAt = &fp
-		if !classifyStalled(p) {
+		if !classifyStall(p).Stalled {
 			t.Error("expected stalled=true when lastActivityAt is zero and addedAt baseline exceeds stallTimeout")
 		}
 	})
@@ -216,7 +216,7 @@ func TestClassifyStalled(t *testing.T) {
 		p.addedAt = longAgo
 		fp := now.Add(-10 * time.Second)
 		p.firstPeerAt = &fp
-		if classifyStalled(p) {
+		if classifyStall(p).Stalled {
 			t.Error("expected stalled=false when firstPeerAt is more recent than stallTimeout baseline")
 		}
 	})

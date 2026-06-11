@@ -99,12 +99,14 @@ func fetchExternalIP() string {
 
 // GetHealth returns a structured health report.
 func (s *Session) GetHealth() *HealthReport {
+	// ListStalled takes its own locks — compute before acquiring ours.
+	stalledCount := len(s.ListStalled())
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var activeDown, activeUp int64
 	var totalDownSpeed, totalUpSpeed int64
-	var stalledCount int
 	var totalPeers int
 
 	for _, mt := range s.torrents {

@@ -505,10 +505,17 @@ func TestGetStallInfo_UnknownHashReturnsError(t *testing.T) {
 // Both the api/v1 handler and Pilot's stallwatcher rely on this
 // being the FIRST branch the classifier hits, before the
 // `mt.t.BytesMissing()` access (which would panic for pre-metadata).
+// GetStallInfo honors the session startup grace like every other
+// classifyStall consumer, so the test zeroes it.
 func TestGetStallInfo_NoPeersEverPath(t *testing.T) {
 	saved1 := firstPeerTimeout
+	saved2 := sessionStartupGrace
 	firstPeerTimeout = 10 * time.Millisecond
-	t.Cleanup(func() { firstPeerTimeout = saved1 })
+	sessionStartupGrace = 0
+	t.Cleanup(func() {
+		firstPeerTimeout = saved1
+		sessionStartupGrace = saved2
+	})
 
 	session := newTestSession(t)
 
