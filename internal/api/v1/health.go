@@ -2,9 +2,7 @@ package v1
 
 import (
 	"context"
-	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 
@@ -13,13 +11,6 @@ import (
 
 type healthOutput struct {
 	Body *torrent.HealthReport
-}
-
-type setDeadlineInput struct {
-	Hash string `path:"hash" doc:"Torrent info hash"`
-	Body struct {
-		Deadline string `json:"deadline" required:"false" doc:"ISO8601 deadline, empty to clear"`
-	}
 }
 
 type setMetadataInput struct {
@@ -49,29 +40,6 @@ func RegisterHealthRoutes(api huma.API, session *torrent.Session) {
 		Tags:        []string{"Health"},
 	}, func(_ context.Context, _ *struct{}) (*healthOutput, error) {
 		return &healthOutput{Body: session.GetHealth()}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "set-torrent-deadline",
-		Method:      http.MethodPut,
-		Path:        "/api/v1/torrents/{hash}/deadline",
-		Summary:     "Set a download deadline for priority scheduling",
-		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *setDeadlineInput) (*emptyOutput, error) {
-		if input.Body.Deadline == "" {
-			if err := session.SetDeadline(input.Hash, nil); err != nil {
-				return nil, huma.Error404NotFound(err.Error())
-			}
-		} else {
-			t, err := parseTime(input.Body.Deadline)
-			if err != nil {
-				return nil, huma.Error422UnprocessableEntity("invalid deadline format: " + err.Error())
-			}
-			if err := session.SetDeadline(input.Hash, &t); err != nil {
-				return nil, huma.Error404NotFound(err.Error())
-			}
-		}
-		return &emptyOutput{}, nil
 	})
 
 	huma.Register(api, huma.Operation{
@@ -128,19 +96,4 @@ func RegisterHealthRoutes(api huma.API, session *torrent.Session) {
 	}, func(_ context.Context, _ *struct{}) (*stalledListOutput, error) {
 		return &stalledListOutput{Body: session.ListStalled()}, nil
 	})
-}
-
-func parseTime(s string) (time.Time, error) {
-	// Try common formats.
-	for _, layout := range []string{
-		time.RFC3339,
-		time.RFC3339Nano,
-		"2006-01-02T15:04:05",
-		"2006-01-02",
-	} {
-		if t, err := time.Parse(layout, s); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("unrecognized time format: %s", s)
 }

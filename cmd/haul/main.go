@@ -216,13 +216,11 @@ func main() {
 		seedTicker := time.NewTicker(60 * time.Second)
 		stallTicker := time.NewTicker(30 * time.Second)
 		healthTicker := time.NewTicker(30 * time.Second)
-		bandwidthTicker := time.NewTicker(5 * time.Second)
 		scheduleTicker := time.NewTicker(60 * time.Second)
 		vpnTicker := time.NewTicker(5 * time.Minute)
 		defer seedTicker.Stop()
 		defer stallTicker.Stop()
 		defer healthTicker.Stop()
-		defer bandwidthTicker.Stop()
 		defer scheduleTicker.Stop()
 		defer vpnTicker.Stop()
 		for {
@@ -235,8 +233,6 @@ func main() {
 				session.PublishHealth(context.Background())
 			case <-vpnTicker.C:
 				torrent.CheckVPN()
-			case <-bandwidthTicker.C:
-				session.AdaptiveBandwidth()
 			case <-scheduleTicker.C:
 				session.CheckSpeedSchedule(cfg.Schedule)
 			}
