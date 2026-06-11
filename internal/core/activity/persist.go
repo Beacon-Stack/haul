@@ -4,10 +4,9 @@
 // stream.
 //
 // What gets persisted: every event with an InfoHash, except the
-// high-frequency telemetry types (speed_update, health_update). The
-// noise types are deliberately filtered here, not at the bus, since
-// the live websocket stream still needs them for the dashboard
-// gauges.
+// high-frequency health_update telemetry. The noise type is filtered
+// here, not at the bus, since the live websocket stream still needs
+// it for the dashboard gauges.
 //
 // Failures are logged and swallowed — losing one row of activity
 // history is not worth crashing a download for.
@@ -26,13 +25,12 @@ import (
 // this list tight: when in doubt, persist; the table can absorb a
 // lot of rows but a missing event leaves a gap a user might notice.
 var noisyTypes = map[events.Type]struct{}{
-	events.TypeSpeedUpdate:  {},
 	events.TypeHealthUpdate: {},
 }
 
 // execer is the narrow surface Persister actually uses on *sql.DB.
 // Defined as an interface so the unit test can supply a fake without
-// standing up a real Postgres.
+// standing up a real database.
 type execer interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }

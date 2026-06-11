@@ -71,7 +71,7 @@ func TestBusTimestampAutoFill(t *testing.T) {
 	})
 
 	before := time.Now().UTC()
-	bus.Publish(context.Background(), Event{Type: TypeSpeedUpdate})
+	bus.Publish(context.Background(), Event{Type: TypeHealthUpdate})
 
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
@@ -135,7 +135,7 @@ func TestBusHandlerPanicRecovery(t *testing.T) {
 		wg.Done()
 	})
 
-	bus.Publish(context.Background(), Event{Type: TypeTorrentFailed})
+	bus.Publish(context.Background(), Event{Type: TypeTorrentStateChanged})
 
 	done := make(chan struct{})
 	go func() { wg.Wait(); close(done) }()
@@ -155,10 +155,8 @@ func TestEventTypeConstants(t *testing.T) {
 		TypeTorrentAdded,
 		TypeTorrentRemoved,
 		TypeTorrentCompleted,
-		TypeTorrentFailed,
 		TypeTorrentStateChanged,
 		TypeTorrentStalled,
-		TypeSpeedUpdate,
 		TypeHealthUpdate,
 	}
 
