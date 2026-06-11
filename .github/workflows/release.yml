@@ -42,8 +42,8 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          # GHCR_TOKEN is a classic PAT with write:packages scope.
-          # See the comment in ci.yml for context.
+          # Auto-provided GITHUB_TOKEN; `packages: write` above grants the
+          # push scope. See the comment in ci.yml for context.
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Run GoReleaser

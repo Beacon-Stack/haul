@@ -67,13 +67,14 @@ changelog:
       - '^ci:'
       - '(?i)merge pull request'
 
+# Release images are amd64-only; `:latest` is owned by the CI main-branch
+# job (which pushes multi-arch) so a release never downgrades arm64 users.
 dockers:
   - image_templates:
       - 'ghcr.io/beacon-stack/haul:{{ .Version }}'
       - 'ghcr.io/beacon-stack/haul:v{{ .Major }}.{{ .Minor }}'
       - 'ghcr.io/beacon-stack/haul:v{{ .Major }}'
-      - 'ghcr.io/beacon-stack/haul:latest'
-    dockerfile: docker/Dockerfile
+    dockerfile: docker/Dockerfile.goreleaser
     use: buildx
     goos: linux
     goarch: amd64

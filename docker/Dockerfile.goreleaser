@@ -1,0 +1,32 @@
+# Release image built by GoReleaser (.goreleaser.yaml `dockers:` section).
+# GoReleaser's docker build context contains only the prebuilt binary —
+# the frontend is already embedded via go:embed by the `before:` hook that
+# runs `npm run build` ahead of the Go build. The full multi-stage build
+# for CI/main-branch images lives in docker/Dockerfile.
+FROM alpine:3.21
+
+# ca-certificates for outbound HTTPS to trackers; tzdata for correct
+# time display in the UI.
+RUN apk add --no-cache ca-certificates tzdata && \
+    adduser -D -u 1000 haul
+
+COPY haul /usr/local/bin/haul
+
+# Beacon-stack-shaped defaults — override via the container's
+# `environment:` block for standalone use.
+ENV HAUL_DATABASE_PATH=/config/haul.db \
+    HAUL_PULSE_URL=http://pulse:9696 \
+    HAUL_TORRENT_LISTEN_PORT=6881 \
+    HAUL_TORRENT_DOWNLOAD_DIR=/downloads \
+    HAUL_LOG_LEVEL=info \
+    TZ=UTC
+
+# /config holds the SQLite database and engine state; /downloads holds data.
+VOLUME ["/config", "/downloads"]
+
+# Web UI + API / peer-wire TCP / peer-wire UDP.
+EXPOSE 8484 6881 6881/udp
+
+USER haul
+
+ENTRYPOINT ["/usr/local/bin/haul"]

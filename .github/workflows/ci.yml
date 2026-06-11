@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  packages: write  # required to push to ghcr.io
 
 jobs:
   test:
@@ -29,15 +28,36 @@ jobs:
       - name: Run tests (with race detector)
         run: go test -race -timeout 120s ./...
 
-      - name: Run tests (coverage)
-        run: go test -coverprofile=coverage.out -timeout 120s ./...
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          name: coverage
-          path: coverage.out
-          retention-days: 7
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/ui/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web/ui
+
+      - name: Run tests
+        run: npx vitest run
+        working-directory: web/ui
+
+      - name: Build (typecheck + bundle)
+        run: npm run build
+        working-directory: web/ui
+
+      # The built bundle is committed (web/static is embedded via go:embed
+      # so `go build` works without npm). Fail if a UI change shipped
+      # without regenerating it.
+      - name: Verify committed web/static is fresh
+        run: git diff --exit-code -- web/static
 
   lint:
     name: Lint
@@ -94,7 +114,7 @@ jobs:
     runs-on: ubuntu-latest
     # Only build and push images on pushes to main (not PRs).
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [test, build]
+    needs: [test, build, frontend]
     permissions:
       contents: read
       packages: write  # required to push to ghcr.io
@@ -110,11 +130,8 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           # Auto-provided GITHUB_TOKEN; the `packages: write` permission on
-
           # this job grants the right scopes. Works because the ghcr package
-
           # already exists (the 403-on-new-package issue only affects the
-
           # first push).
           password: ${{ secrets.GITHUB_TOKEN }}
 
