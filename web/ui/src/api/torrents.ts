@@ -21,7 +21,6 @@ export interface TorrentInfo {
   added_at: string;
   completed_at?: string;
   content_path: string;
-  sequential: boolean;
   // True when the backend's stall detector has classified this torrent as
   // inactive (no bytes for >= stall_timeout, default 120s, OR never observed
   // a peer past firstPeerTimeout). Always false unless status === "downloading".

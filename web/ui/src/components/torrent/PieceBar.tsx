@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PiecesInfo, TorrentFile } from "@/api/torrents";
+import { formatBytes } from "@/lib/format";
 import {
   runsToColumns,
   computeFileSegments,
@@ -354,10 +355,3 @@ export default function PieceBar({ pieces, files, progress }: PieceBarProps) {
   );
 }
 
-function formatBytes(b: number): string {
-  if (b <= 0) return "0 B";
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}

@@ -1,4 +1,4 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import {
   useTorrent,
   useTorrentFiles,
@@ -12,29 +12,14 @@ import {
 } from "@/api/torrents";
 import { Pause, Play, Trash2, FileText, Link2, Hash, Download } from "lucide-react";
 import { toast } from "sonner";
-import { useNavigate } from "react-router-dom";
 import { useConfirm } from "@beacon-shared/ConfirmDialog";
-import { torrentVisual } from "@/lib/torrentStatus";
+import { torrentVisual, visualByKey } from "@/lib/torrentStatus";
 import PieceBar from "@/components/torrent/PieceBar";
 import PeerList from "@/components/torrent/PeerList";
 import TrackerList from "@/components/torrent/TrackerList";
 import CollapsibleSection from "@/components/torrent/CollapsibleSection";
 import StallCallout from "@/components/torrent/StallCallout";
-
-function formatBytes(b: number): string {
-  if (b <= 0) return "0 B";
-  if (b < 1024) return `${b} B`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function formatSpeed(b: number): string {
-  if (b <= 0) return "0 B/s";
-  if (b < 1024) return `${b} B/s`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB/s`;
-  return `${(b / (1024 * 1024)).toFixed(1)} MB/s`;
-}
+import { formatBytes, formatSpeed } from "@/lib/format";
 
 // Status colours / labels come from the canonical helper in
 // @/lib/torrentStatus. Don't add inline switches — keep this in sync with
@@ -157,7 +142,7 @@ export default function TorrentDetail() {
               <Play size={13} /> Resume
             </button>
           ) : (
-            <button onClick={() => pause.mutate(t.info_hash)} style={btnStyle("var(--color-status-paused)")}>
+            <button onClick={() => pause.mutate(t.info_hash)} style={btnStyle(visualByKey("paused").color)}>
               <Pause size={13} /> Pause
             </button>
           )}

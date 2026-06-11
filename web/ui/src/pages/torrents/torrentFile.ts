@@ -24,7 +24,7 @@ export function validateTorrentFile(file: File): ValidateResult {
     return { ok: false, error: "File is empty" };
   }
   if (file.size > MAX_TORRENT_FILE_BYTES) {
-    return { ok: false, error: `File exceeds ${formatBytes(MAX_TORRENT_FILE_BYTES)} limit` };
+    return { ok: false, error: `File exceeds ${formatTorrentFileBytes(MAX_TORRENT_FILE_BYTES)} limit` };
   }
   return { ok: true };
 }
@@ -61,7 +61,9 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-export function formatBytes(n: number): string {
+// Deliberately caps at MB: .torrent files are KB-scale, so a GB reading
+// is a bug worth seeing, not autoscaling away.
+export function formatTorrentFileBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;

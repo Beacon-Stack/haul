@@ -2,13 +2,13 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { ConfirmProvider } from "@beacon-shared/ConfirmDialog";
+import { ErrorBoundary } from "@beacon-shared/ErrorBoundary";
 import Shell from "@/layouts/Shell";
 import TorrentList from "@/pages/torrents/TorrentList";
 import TorrentDetail from "@/pages/torrents/TorrentDetail";
 import ActivityPage from "@/pages/activity/ActivityPage";
 import ActivityDetailPage from "@/pages/activity/ActivityDetailPage";
 import CategoriesPage from "@/pages/categories/CategoriesPage";
-import RSSPage from "@/pages/rss/RSSPage";
 import SettingsPage from "@/pages/settings/SettingsPage";
 import MediaManagementPage from "@/pages/media-management/MediaManagementPage";
 import DiagnosticsPage from "@/pages/system/Diagnostics";
@@ -24,6 +24,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <ConfirmProvider>
         <BrowserRouter>
+          <ErrorBoundary>
           <Routes>
             <Route element={<Shell />}>
               <Route index element={<TorrentList />} />
@@ -31,7 +32,6 @@ export default function App() {
               <Route path="activity" element={<ActivityPage />} />
               <Route path="activity/:hash" element={<ActivityDetailPage />} />
               <Route path="categories" element={<CategoriesPage />} />
-              <Route path="rss" element={<RSSPage />} />
               <Route path="media-management" element={<MediaManagementPage />} />
               <Route path="settings" element={<SettingsPage />} />
               <Route path="system/diagnostics" element={<DiagnosticsPage />} />
@@ -39,6 +39,7 @@ export default function App() {
               <Route path="system/logs" element={<LogsPage />} />
             </Route>
           </Routes>
+          </ErrorBoundary>
           <Toaster
             position="bottom-right"
             toastOptions={{

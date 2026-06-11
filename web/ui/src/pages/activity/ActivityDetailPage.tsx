@@ -6,10 +6,8 @@ import {
   Trash2,
   Download,
   AlertTriangle,
-  Pause,
-  Play,
+  ExternalLink,
 } from "lucide-react";
-import { ExternalLink } from "lucide-react";
 import { useActivityEvents, useHistoryByHash, usePeerServices, type ActivityEvent, type HistoryRecord } from "@/api/activity";
 import { useTorrent } from "@/api/torrents";
 import { formatBytes, formatDate } from "@/shared/utils";
@@ -18,11 +16,8 @@ const EVENT_DISPLAY: Record<string, { label: string; color: string; Icon: React.
   torrent_added: { label: "Added", color: "var(--color-accent)", Icon: Download },
   torrent_completed: { label: "Completed", color: "var(--color-success)", Icon: CheckCircle },
   torrent_removed: { label: "Removed", color: "var(--color-text-muted)", Icon: Trash2 },
-  torrent_failed: { label: "Failed", color: "var(--color-danger)", Icon: AlertTriangle },
   torrent_stalled: { label: "Stalled", color: "var(--color-warning)", Icon: AlertTriangle },
   torrent_state_changed: { label: "State changed", color: "var(--color-text-secondary)", Icon: Activity },
-  torrent_paused: { label: "Paused", color: "var(--color-text-muted)", Icon: Pause },
-  torrent_resumed: { label: "Resumed", color: "var(--color-accent)", Icon: Play },
 };
 
 export default function ActivityDetailPage() {

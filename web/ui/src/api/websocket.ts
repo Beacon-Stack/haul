@@ -25,7 +25,7 @@ export function useWebSocket() {
       ws.onmessage = (ev) => {
         try {
           const event = JSON.parse(ev.data);
-          if (event.type?.startsWith("torrent_") || event.type === "speed_update") {
+          if (event.type?.startsWith("torrent_")) {
             qc.invalidateQueries({ queryKey: ["torrents"] });
             qc.invalidateQueries({ queryKey: ["stats"] });
           }

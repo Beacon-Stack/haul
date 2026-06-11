@@ -37,7 +37,6 @@ function makeTorrent(overrides: Partial<TorrentInfo>): TorrentInfo {
     eta: 0,
     added_at: new Date().toISOString(),
     content_path: "/tmp/torrent",
-    sequential: false,
     stalled: false,
     ...overrides,
   };

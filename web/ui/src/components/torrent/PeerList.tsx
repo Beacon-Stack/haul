@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { Lock, ArrowUp, ArrowDown } from "lucide-react";
 import type { PeerInfo } from "@/api/torrents";
+import { formatSpeed } from "@/lib/format";
 
 // PeerList — compact table of connected peers, 6 columns, sortable by
 // download/upload/progress. See plans/haul-torrent-detail-enhancements.md §5.
@@ -14,13 +15,6 @@ type SortDir = "asc" | "desc";
 
 interface PeerListProps {
   peers: PeerInfo[];
-}
-
-function formatSpeed(b: number): string {
-  if (b <= 0) return "—";
-  if (b < 1024) return `${b} B/s`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB/s`;
-  return `${(b / (1024 * 1024)).toFixed(1)} MB/s`;
 }
 
 export default function PeerList({ peers }: PeerListProps) {

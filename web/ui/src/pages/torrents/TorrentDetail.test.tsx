@@ -54,7 +54,6 @@ vi.mock("@/api/torrents", async () => {
     eta: 0,
     added_at: new Date().toISOString(),
     content_path: "/tmp/test-torrent",
-    sequential: false,
     stalled: true,
   };
   const pieces: PiecesInfo = { num_pieces: 0, piece_size: 0, runs: [] };

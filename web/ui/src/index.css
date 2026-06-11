@@ -83,6 +83,54 @@
   }
 }
 
+/* Settings form controls — shared by Settings + Media Management. */
+.settings-input {
+  width: 100%;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-default);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  outline: none;
+  box-sizing: border-box;
+}
+.settings-input:focus {
+  border-color: var(--color-accent);
+}
+.settings-input-mono {
+  font-family: var(--font-family-mono);
+  font-size: 12px;
+}
+
+.settings-save:not(:disabled):hover {
+  background: var(--color-accent-hover) !important;
+}
+
+.linklike-button {
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  padding: 0;
+}
+.linklike-button:hover {
+  color: var(--color-text-secondary);
+}
+
+.context-menu-item:not(:disabled):hover {
+  background: var(--color-bg-subtle);
+}
+
+.theme-pick-button:not([data-selected="true"]):hover {
+  border-color: var(--color-border-strong) !important;
+}
+.theme-mode-button:not([data-selected="true"]):hover {
+  border-color: var(--color-border-strong) !important;
+  color: var(--color-text-primary) !important;
+}
+
 .skeleton {
   background: linear-gradient(
     90deg,

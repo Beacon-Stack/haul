@@ -300,7 +300,7 @@ export default function ActivityPage() {
 }
 
 function Row({ item }: { item: ActivityItem }) {
-  const status = useMemo(() => statusOf(item), [item]);
+  const status = statusOf(item);
 
   return (
     <tr
