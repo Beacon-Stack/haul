@@ -14,10 +14,8 @@ const (
 	TypeTorrentAdded        Type = "torrent_added"
 	TypeTorrentRemoved      Type = "torrent_removed"
 	TypeTorrentCompleted    Type = "torrent_completed"
-	TypeTorrentFailed       Type = "torrent_failed"
 	TypeTorrentStateChanged Type = "torrent_state_changed"
 	TypeTorrentStalled      Type = "torrent_stalled"
-	TypeSpeedUpdate         Type = "speed_update"
 	TypeHealthUpdate        Type = "health_update"
 )
 

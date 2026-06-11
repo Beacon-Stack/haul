@@ -81,7 +81,7 @@ func TestPersister_SkipsNoisyTypes(t *testing.T) {
 	fake := &fakeExecer{}
 	p := newPersister(fake)
 
-	for _, ty := range []events.Type{events.TypeSpeedUpdate, events.TypeHealthUpdate} {
+	for _, ty := range []events.Type{events.TypeHealthUpdate} {
 		p.HandleEvent(context.Background(), events.Event{
 			Type:      ty,
 			InfoHash:  "abc123",
