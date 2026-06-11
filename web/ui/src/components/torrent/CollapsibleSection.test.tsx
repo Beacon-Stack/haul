@@ -81,13 +81,4 @@ describe("<CollapsibleSection>", () => {
     );
     expect(screen.getByText("42")).toBeInTheDocument();
   });
-
-  it("forceClosed wins over defaultOpen=true at initial render", () => {
-    render(
-      <CollapsibleSection label="X" defaultOpen={true} forceClosed>
-        <div>hidden</div>
-      </CollapsibleSection>
-    );
-    expect(screen.queryByText("hidden")).not.toBeInTheDocument();
-  });
 });

@@ -342,6 +342,7 @@ interface ItemProps {
 function Item({ icon: Icon, label, onClick, disabled, danger, title }: ItemProps) {
   return (
     <button
+      className="context-menu-item"
       onClick={onClick}
       disabled={disabled}
       title={title}
@@ -364,13 +365,6 @@ function Item({ icon: Icon, label, onClick, disabled, danger, title }: ItemProps
           : "var(--color-text-primary)",
         cursor: disabled ? "not-allowed" : "pointer",
         opacity: disabled ? 0.5 : 1,
-      }}
-      onMouseEnter={(e) => {
-        if (disabled) return;
-        (e.currentTarget as HTMLButtonElement).style.background = "var(--color-bg-subtle)";
-      }}
-      onMouseLeave={(e) => {
-        (e.currentTarget as HTMLButtonElement).style.background = "transparent";
       }}
     >
       <Icon size={14} style={{ flexShrink: 0 }} />

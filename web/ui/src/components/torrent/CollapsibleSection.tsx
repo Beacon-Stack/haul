@@ -14,10 +14,6 @@ interface CollapsibleSectionProps {
   count?: number | string;
   defaultOpen?: boolean;
   children: ReactNode;
-  // When set, forces the open state and disables user toggling. Used for the
-  // piece bar which auto-collapses on 100% torrents but still lets the user
-  // click the header to expand.
-  forceClosed?: boolean;
 }
 
 export default function CollapsibleSection({
@@ -25,9 +21,8 @@ export default function CollapsibleSection({
   count,
   defaultOpen = true,
   children,
-  forceClosed = false,
 }: CollapsibleSectionProps) {
-  const [open, setOpen] = useState(defaultOpen && !forceClosed);
+  const [open, setOpen] = useState(defaultOpen);
 
   return (
     <div style={{ marginBottom: 24 }}>

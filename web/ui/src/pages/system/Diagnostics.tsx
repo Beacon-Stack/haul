@@ -11,6 +11,7 @@ import {
   type CleanupMode,
 } from "@/api/adminDiagnostics";
 import { apiFetch } from "@/api/client";
+import Modal from "@beacon-shared/Modal";
 
 // Settings → System → Diagnostics. Lists every named diagnostic the
 // service knows about. Each card expands inline to show matching rows
@@ -335,8 +336,7 @@ function ConfirmModal(props: {
   loading: boolean;
 }) {
   return (
-    <div style={modalBackdropStyle} onClick={props.onCancel}>
-      <div style={modalStyle} onClick={(e) => e.stopPropagation()}>
+    <Modal onClose={props.onCancel} width={480} innerStyle={{ background: "var(--color-bg-elevated)", padding: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
           <AlertTriangle size={20} color="var(--color-warning)" />
           <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: "var(--color-text-primary)" }}>
@@ -380,8 +380,7 @@ function ConfirmModal(props: {
             {props.loading ? "Cleaning…" : props.hardDelete ? "Delete permanently" : "Move to cleanup history"}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -402,24 +401,6 @@ const inlineCodeStyle: React.CSSProperties = {
   borderRadius: 4,
   fontFamily: "var(--font-family-mono)",
   fontSize: 12,
-};
-const modalBackdropStyle: React.CSSProperties = {
-  position: "fixed",
-  inset: 0,
-  background: "rgba(0,0,0,0.6)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  zIndex: 100,
-};
-const modalStyle: React.CSSProperties = {
-  background: "var(--color-bg-elevated)",
-  borderRadius: 10,
-  border: "1px solid var(--color-border-default)",
-  padding: 24,
-  width: 480,
-  maxWidth: "90vw",
-  boxShadow: "var(--shadow-modal)",
 };
 const cancelButtonStyle: React.CSSProperties = {
   padding: "7px 14px",

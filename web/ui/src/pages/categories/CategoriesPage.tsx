@@ -1,41 +1,8 @@
 import { useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/api/client";
 import { FolderOpen, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@beacon-shared/ConfirmDialog";
-
-interface Category {
-  name: string;
-  save_path: string;
-  upload_limit: number;
-  download_limit: number;
-}
-
-function useCategories() {
-  return useQuery({
-    queryKey: ["categories"],
-    queryFn: () => apiFetch<Category[]>("/categories"),
-  });
-}
-
-function useCreateCategory() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (cat: { name: string; save_path?: string }) =>
-      apiFetch<Category>("/categories", { method: "POST", body: JSON.stringify(cat) }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
-  });
-}
-
-function useDeleteCategory() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (name: string) =>
-      apiFetch(`/categories/${encodeURIComponent(name)}`, { method: "DELETE" }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["categories"] }),
-  });
-}
+import { useCategories, useCreateCategory, useDeleteCategory } from "@/api/categories";
 
 export default function CategoriesPage() {
   const { data: categories, isLoading } = useCategories();

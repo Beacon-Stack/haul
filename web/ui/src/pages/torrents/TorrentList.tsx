@@ -11,21 +11,9 @@ import { torrentVisual, visualByKey, type TorrentVisualKey } from "@/lib/torrent
 import { DndContext, closestCenter, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { validateTorrentFile, readTorrentFileAsDataURI, formatBytes as formatFileBytes } from "./torrentFile";
-
-function formatSpeed(b: number): string {
-  if (b <= 0) return "-";
-  if (b < 1024) return `${b} B/s`;
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB/s`;
-  return `${(b / (1024 * 1024)).toFixed(1)} MB/s`;
-}
-
-function formatBytes(b: number): string {
-  if (b <= 0) return "-";
-  if (b < 1024 * 1024) return `${(b / 1024).toFixed(0)} KB`;
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
+import { validateTorrentFile, readTorrentFileAsDataURI, formatTorrentFileBytes } from "./torrentFile";
+import Modal from "@beacon-shared/Modal";
+import { formatBytes, formatSpeed } from "@/lib/format";
 
 function formatETA(secs: number): string {
   if (secs <= 0) return "-";
@@ -181,15 +169,8 @@ function AddModal({ onClose }: { onClose: () => void }) {
   const canSubmit = (file !== null || uri.trim().length > 0) && !fileError && !addTorrent.isPending;
 
   return (
-    <div
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 }}
-      onClick={onClose}
-    >
-      <div
-        style={{ background: "var(--color-bg-elevated)", borderRadius: 10, border: "1px solid var(--color-border-default)", padding: 24, width: 480, maxWidth: "90vw", boxShadow: "var(--shadow-modal)" }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600, color: "var(--color-text-primary)" }}>Add Torrent</h3>
+    <Modal onClose={onClose} width={480} innerStyle={{ background: "var(--color-bg-elevated)", padding: 24 }}>
+      <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 600, color: "var(--color-text-primary)" }}>Add Torrent</h3>
 
         <input
           value={uri}
@@ -277,7 +258,7 @@ function AddModal({ onClose }: { onClose: () => void }) {
             <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "var(--font-family-mono)" }}>
               {file.name}
             </span>
-            <span style={{ color: "var(--color-text-muted)" }}>{formatFileBytes(file.size)}</span>
+            <span style={{ color: "var(--color-text-muted)" }}>{formatTorrentFileBytes(file.size)}</span>
             <button
               onClick={clearFile}
               aria-label="Remove file"
@@ -328,8 +309,7 @@ function AddModal({ onClose }: { onClose: () => void }) {
             {addTorrent.isPending ? "Adding..." : "Add"}
           </button>
         </div>
-      </div>
-    </div>
+    </Modal>
   );
 }
 
@@ -413,7 +393,6 @@ function TorrentCard({ t, draggable, onContextMenu }: {
         overflow: "hidden",
       }}
     >
-      {/* Row 1: Drag handle + Name + Status badge + Actions */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 16px 0" }}>
         {/* Drag handle — only in manual sort mode */}
         {draggable && (
@@ -474,7 +453,6 @@ function TorrentCard({ t, draggable, onContextMenu }: {
         </div>
       </div>
 
-      {/* Row 2: Stats grid — evenly distributed */}
       <div style={{
         display: "grid",
         gridTemplateColumns: "repeat(auto-fit, minmax(70px, 1fr))",
@@ -482,9 +460,9 @@ function TorrentCard({ t, draggable, onContextMenu }: {
         padding: "10px 16px",
       }}>
         <StatCell label="Size" value={formatBytes(t.size)} />
-        {isDownloading && <StatCell label="↓ Speed" value={t.download_rate > 0 ? formatSpeed(t.download_rate) : "0"} color={t.download_rate > 0 ? "var(--color-accent)" : "var(--color-text-muted)"} />}
+        {isDownloading && <StatCell label="↓ Speed" value={formatSpeed(t.download_rate)} color={t.download_rate > 0 ? "var(--color-accent)" : "var(--color-text-muted)"} />}
         {isDownloading && <StatCell label="ETA" value={t.download_rate > 0 ? formatETA(t.eta) : "∞"} />}
-        {isDownloading && <StatCell label="Left" value={amountLeft > 0 ? formatBytes(amountLeft) : "0"} />}
+        {isDownloading && <StatCell label="Left" value={formatBytes(amountLeft)} />}
         {(isDownloading || isSeeding) && <StatCell label="↑ Speed" value={formatSpeed(t.upload_rate)} color="var(--color-success)" />}
         <StatCell label="Seeds" value={String(t.seeds)} color={t.seeds <= 1 && isDownloading ? "var(--color-warning)" : undefined} />
         <StatCell label="Peers" value={String(t.peers)} />
@@ -493,8 +471,7 @@ function TorrentCard({ t, draggable, onContextMenu }: {
         <StatCell label="Active" value={formatTimeActive(t.added_at)} />
       </div>
 
-      {/* Row 3: Progress bar with percentage */}
-      <div style={{ padding: "0 16px 0", display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ padding: "0 16px 10px", display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{ flex: 1, height: 6, borderRadius: 3, background: "var(--color-bg-subtle)" }}>
           <div style={{
             width: `${Math.min(t.progress * 100, 100)}%`,
@@ -508,9 +485,6 @@ function TorrentCard({ t, draggable, onContextMenu }: {
           {(t.progress * 100).toFixed(1)}%
         </span>
       </div>
-
-      {/* Bottom spacer */}
-      <div style={{ height: 10 }} />
     </div>
   );
 }
@@ -1124,36 +1098,14 @@ export default function TorrentList() {
 // double-duties as a category picker for both new categories and
 // existing ones — typing a name that doesn't match selects "create new".
 
+// ModalShell adds the title + compact sizing the submodals share; the
+// backdrop / ESC / click-away behavior comes from the shared Modal.
 function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.5)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        zIndex: 9998,
-      }}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          background: "var(--color-bg-elevated)",
-          border: "1px solid var(--color-border-default)",
-          borderRadius: 10,
-          padding: 20,
-          width: 420,
-          maxWidth: "92vw",
-          boxShadow: "0 12px 36px rgba(0,0,0,0.45)",
-        }}
-      >
-        <h3 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 600, color: "var(--color-text-primary)" }}>{title}</h3>
-        {children}
-      </div>
-    </div>
+    <Modal onClose={onClose} width={420} innerStyle={{ background: "var(--color-bg-elevated)", padding: 20 }}>
+      <h3 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 600, color: "var(--color-text-primary)" }}>{title}</h3>
+      {children}
+    </Modal>
   );
 }
 
