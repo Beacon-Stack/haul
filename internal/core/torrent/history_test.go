@@ -1,20 +1,22 @@
 package torrent
 
 // history_test.go — pins the SQL the history-lookup endpoint emits
-// across filter combinations. Tested at the buildHistoryQuery layer
-// (pure: filter struct → SQL string + args) so we don't need a
-// postgres test fixture, while still catching regressions in the
-// WHERE-clause assembly that powers Pilot/Prism's library badges
-// and the manual-search guardrail.
+// across filter combinations, at the buildHistoryQuery layer (pure:
+// filter struct → SQL string + args). This WHERE-clause assembly
+// powers Pilot/Prism's library badges and the manual-search guardrail.
 //
-// LookupHistory's nil-DB short-circuit and rows.Scan plumbing are
-// covered separately by an integration test against the live compose
-// stack — out of scope here because Haul has no DB-test infra.
+// Every combination is also executed against an in-memory SQLite —
+// substring assertions alone once let a fmt.Sprintf leftover append
+// "%!(EXTRA int=1)" to every filtered clause while the suite stayed
+// green, because the clause prefix still matched.
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestBuildHistoryQuery_AllFiltersJoinWithAnd(t *testing.T) {
@@ -125,6 +127,52 @@ func TestBuildHistoryQuery_MovieFilter(t *testing.T) {
 	}
 	if len(args) != 2 || args[0] != "prism" || args[1] != "27b54ce3-1bbf-4df8-8f93-e002e52f19c7" {
 		t.Errorf("movie args: got %v", args)
+	}
+}
+
+// Every filter combination must produce SQL that SQLite actually
+// accepts, with a matching arg count. Executed, not just inspected.
+func TestBuildHistoryQuery_ExecutesAgainstSQLite(t *testing.T) {
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`CREATE TABLE torrents (
+		info_hash TEXT, name TEXT, save_path TEXT, category TEXT,
+		added_at TEXT, completed_at TEXT, removed_at TEXT,
+		requester_service TEXT, requester_movie_id TEXT,
+		requester_series_id TEXT, requester_episode_id TEXT,
+		requester_tmdb_id INTEGER, requester_season INTEGER,
+		requester_episode INTEGER
+	)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+
+	filters := map[string]HistoryFilter{
+		"empty":           {},
+		"service":         {Service: "pilot"},
+		"info_hash":       {InfoHash: "abc"},
+		"movie":           {Service: "prism", MovieID: "m-1"},
+		"series":          {SeriesID: "s-1"},
+		"episode_id":      {EpisodeID: "ep-1"},
+		"tmdb":            {TMDBID: 95479},
+		"season_episode":  {Season: 1, Episode: 48},
+		"include_removed": {InfoHash: "abc", IncludeRemoved: true},
+		"everything": {
+			Service: "pilot", InfoHash: "abc", MovieID: "m-1",
+			SeriesID: "s-1", EpisodeID: "ep-1", TMDBID: 95479,
+			Season: 1, Episode: 48, IncludeRemoved: true, Limit: 7,
+		},
+	}
+	for name, f := range filters {
+		q, args := buildHistoryQuery(f)
+		rows, err := db.Query(q, args...)
+		if err != nil {
+			t.Errorf("%s: generated SQL rejected by SQLite: %v\n%s", name, err, q)
+			continue
+		}
+		rows.Close()
 	}
 }
 

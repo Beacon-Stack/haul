@@ -67,22 +67,18 @@ type HistoryFilter struct {
 }
 
 // buildHistoryQuery composes the SELECT + parameterized WHERE for a
-// HistoryFilter. Pure logic, no I/O — exposed package-private so the
-// unit test can pin the SQL shape across filter combinations without
-// requiring a postgres test fixture.
+// HistoryFilter. Pure logic, no I/O — package-private so the unit test
+// can pin the SQL shape across filter combinations.
 func buildHistoryQuery(f HistoryFilter) (sql string, args []any) {
 	limit := f.Limit
 	if limit <= 0 {
 		limit = 100
 	}
 
-	// Build the parameterized WHERE incrementally. Order doesn't
-	// affect correctness; postgres's planner picks the index based
-	// on the columns referenced.
 	var clauses []string
 	add := func(clause string, arg any) {
 		args = append(args, arg)
-		clauses = append(clauses, fmt.Sprintf(clause, len(args))) // ?, ? …
+		clauses = append(clauses, clause)
 	}
 	if f.Service != "" {
 		add("requester_service = ?", f.Service)

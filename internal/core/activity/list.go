@@ -54,20 +54,15 @@ var validSortColumns = map[string]string{
 
 // buildListQuery composes the SELECT + COUNT for an activity list.
 // Returns the list query, the count query, and the shared args slice.
-// Pure logic, no I/O — split out so the unit test can pin the SQL
-// shape without a postgres fixture.
+// Pure logic, no I/O — split out so the unit test can pin the SQL shape.
 func buildListQuery(f ListFilter) (listSQL, countSQL string, args []any) {
 	var clauses []string
-	add := func(clause string, arg any) {
-		args = append(args, arg)
-		clauses = append(clauses, fmt.Sprintf(clause, len(args)))
-	}
 
 	// Search across the fields the user can see in the table. SQLite's
-	// LIKE is ASCII-case-insensitive by default — equivalent to Postgres
-	// ILIKE for the search shapes we expect here (names + category
-	// strings, both ASCII in practice). Positional `?` placeholders can't
-	// reuse a single arg, so the search term is bound twice.
+	// LIKE is ASCII-case-insensitive by default, which covers the shapes
+	// we expect here (names + category strings, both ASCII in practice).
+	// Positional `?` placeholders can't reuse a single arg, so the
+	// search term is bound twice.
 	if s := strings.TrimSpace(f.Search); s != "" {
 		args = append(args, "%"+s+"%", "%"+s+"%")
 		clauses = append(clauses, "(name LIKE ? OR category LIKE ?)")
@@ -80,10 +75,8 @@ func buildListQuery(f ListFilter) (listSQL, countSQL string, args []any) {
 		clauses = append(clauses, "completed_at IS NOT NULL AND removed_at IS NULL")
 	case "removed":
 		clauses = append(clauses, "removed_at IS NOT NULL")
-	case "", "all":
-		// no filter — show everything
 	default:
-		add("removed_at IS NULL AND ? = ?", f.Status) // unreachable; default is "all"
+		// "", "all", or anything unrecognized — show everything
 	}
 
 	where := ""
