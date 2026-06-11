@@ -37,13 +37,10 @@ type researchInput struct {
 }
 
 type researchOutput struct {
-	Body struct {
-		// Mirrors Pilot/Prism's autoSearchResultBody so the frontend
-		// renders the same shape regardless of which sibling answered.
-		Result       string `json:"result"` // "grabbed" | "no_match"
-		ReleaseTitle string `json:"release_title,omitempty"`
-		Reason       string `json:"reason,omitempty"`
-	}
+	// The sibling's response is passed through verbatim — it already
+	// mirrors Pilot/Prism's autoSearchResultBody, so the frontend
+	// renders the same shape regardless of which sibling answered.
+	Body siblingResearchResult
 }
 
 // RegisterResearchRoutes wires POST /api/v1/torrents/{hash}/research.
@@ -107,16 +104,12 @@ func RegisterResearchRoutes(api huma.API, session *torrent.Session, integ *pulse
 		if callErr != nil {
 			return nil, huma.NewError(http.StatusBadGateway, "sibling research call failed", callErr)
 		}
-		ret := &researchOutput{}
-		ret.Body.Result = out.Result
-		ret.Body.ReleaseTitle = out.ReleaseTitle
-		ret.Body.Reason = out.Reason
-		return ret, nil
+		return &researchOutput{Body: *out}, nil
 	})
 }
 
 type siblingResearchResult struct {
-	Result       string `json:"result"`
+	Result       string `json:"result"` // "grabbed" | "no_match"
 	ReleaseTitle string `json:"release_title,omitempty"`
 	Reason       string `json:"reason,omitempty"`
 }

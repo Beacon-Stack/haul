@@ -156,7 +156,6 @@ func RegisterTorrentControlRoutes(api huma.API, session *torrent.Session) {
 		return &emptyOutput{}, nil
 	})
 
-	// Bulk reorder — set priority for multiple torrents at once
 	huma.Register(api, huma.Operation{
 		OperationID: "reorder-torrents",
 		Method:      http.MethodPut,
@@ -174,7 +173,6 @@ func RegisterTorrentControlRoutes(api huma.API, session *torrent.Session) {
 		return &emptyOutput{}, nil
 	})
 
-	// Force start — bypass queue
 	huma.Register(api, huma.Operation{
 		OperationID: "force-start-torrent",
 		Method:      http.MethodPost,
@@ -188,7 +186,6 @@ func RegisterTorrentControlRoutes(api huma.API, session *torrent.Session) {
 		return &emptyOutput{}, nil
 	})
 
-	// Reannounce — force tracker announce
 	huma.Register(api, huma.Operation{
 		OperationID: "reannounce-torrent",
 		Method:      http.MethodPost,
