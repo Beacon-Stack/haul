@@ -23,14 +23,6 @@ type modifyTagsInput struct {
 	}
 }
 
-type setSpeedLimitsInput struct {
-	Hash string `path:"hash" doc:"Torrent info hash"`
-	Body struct {
-		DownloadLimit int `json:"download_limit" required:"false" doc:"Download speed limit in bytes/s (0=unlimited)"`
-		UploadLimit   int `json:"upload_limit"   required:"false" doc:"Upload speed limit in bytes/s (0=unlimited)"`
-	}
-}
-
 type setSeedLimitsInput struct {
 	Hash string `path:"hash" doc:"Torrent info hash"`
 	Body struct {
@@ -46,13 +38,6 @@ type setPriorityInput struct {
 	}
 }
 
-type setSequentialInput struct {
-	Hash string `path:"hash" doc:"Torrent info hash"`
-	Body struct {
-		Sequential bool `json:"sequential" doc:"Enable sequential download"`
-	}
-}
-
 type setLocationInput struct {
 	Hash string `path:"hash" doc:"Torrent info hash"`
 	Body struct {
@@ -62,14 +47,6 @@ type setLocationInput struct {
 
 type fileListOutput struct {
 	Body []torrent.FileInfo
-}
-
-type setFilePriorityInput struct {
-	Hash  string `path:"hash"  doc:"Torrent info hash"`
-	Index int    `path:"index" doc:"File index"`
-	Body  struct {
-		Priority string `json:"priority" doc:"File priority: skip, normal, or high"`
-	}
 }
 
 // RegisterTorrentControlRoutes registers extended torrent control endpoints.
@@ -114,19 +91,6 @@ func RegisterTorrentControlRoutes(api huma.API, session *torrent.Session) {
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "set-torrent-speed-limits",
-		Method:      http.MethodPut,
-		Path:        "/api/v1/torrents/{hash}/speed-limits",
-		Summary:     "Set per-torrent speed limits",
-		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *setSpeedLimitsInput) (*emptyOutput, error) {
-		if err := session.SetSpeedLimits(input.Hash, input.Body.DownloadLimit, input.Body.UploadLimit); err != nil {
-			return nil, huma.Error404NotFound(err.Error())
-		}
-		return &emptyOutput{}, nil
-	})
-
-	huma.Register(api, huma.Operation{
 		OperationID: "set-torrent-seed-limits",
 		Method:      http.MethodPut,
 		Path:        "/api/v1/torrents/{hash}/seed-limits",
@@ -153,19 +117,6 @@ func RegisterTorrentControlRoutes(api huma.API, session *torrent.Session) {
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "set-torrent-sequential",
-		Method:      http.MethodPut,
-		Path:        "/api/v1/torrents/{hash}/sequential",
-		Summary:     "Toggle sequential download",
-		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *setSequentialInput) (*emptyOutput, error) {
-		if err := session.SetSequential(input.Hash, input.Body.Sequential); err != nil {
-			return nil, huma.Error404NotFound(err.Error())
-		}
-		return &emptyOutput{}, nil
-	})
-
-	huma.Register(api, huma.Operation{
 		OperationID: "set-torrent-location",
 		Method:      http.MethodPut,
 		Path:        "/api/v1/torrents/{hash}/location",
@@ -184,7 +135,7 @@ func RegisterTorrentControlRoutes(api huma.API, session *torrent.Session) {
 		Path:        "/api/v1/torrents/{hash}/files",
 		Summary:     "Get torrent file list",
 		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *controlTorrentInput) (*fileListOutput, error) {
+	}, func(_ context.Context, input *hashInput) (*fileListOutput, error) {
 		files, err := session.GetFiles(input.Hash)
 		if err != nil {
 			return nil, huma.Error404NotFound(err.Error())
@@ -193,25 +144,12 @@ func RegisterTorrentControlRoutes(api huma.API, session *torrent.Session) {
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "set-file-priority",
-		Method:      http.MethodPut,
-		Path:        "/api/v1/torrents/{hash}/files/{index}/priority",
-		Summary:     "Set file download priority",
-		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *setFilePriorityInput) (*emptyOutput, error) {
-		if err := session.SetFilePriority(input.Hash, input.Index, input.Body.Priority); err != nil {
-			return nil, huma.Error422UnprocessableEntity(err.Error())
-		}
-		return &emptyOutput{}, nil
-	})
-
-	huma.Register(api, huma.Operation{
 		OperationID: "recheck-torrent",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/torrents/{hash}/recheck",
 		Summary:     "Re-verify torrent data integrity",
 		Tags:        []string{"Torrents"},
-	}, func(ctx context.Context, input *controlTorrentInput) (*emptyOutput, error) {
+	}, func(ctx context.Context, input *hashInput) (*emptyOutput, error) {
 		if err := session.Recheck(ctx, input.Hash); err != nil {
 			return nil, huma.Error404NotFound(err.Error())
 		}
@@ -243,7 +181,7 @@ func RegisterTorrentControlRoutes(api huma.API, session *torrent.Session) {
 		Path:        "/api/v1/torrents/{hash}/force-start",
 		Summary:     "Force start a torrent (bypass queue limits)",
 		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *controlTorrentInput) (*emptyOutput, error) {
+	}, func(_ context.Context, input *hashInput) (*emptyOutput, error) {
 		if err := session.ForceStart(input.Hash); err != nil {
 			return nil, huma.Error404NotFound(err.Error())
 		}
@@ -257,69 +195,10 @@ func RegisterTorrentControlRoutes(api huma.API, session *torrent.Session) {
 		Path:        "/api/v1/torrents/{hash}/reannounce",
 		Summary:     "Force reannounce to trackers",
 		Tags:        []string{"Torrents"},
-	}, func(ctx context.Context, input *controlTorrentInput) (*emptyOutput, error) {
-		if err := session.Reannounce(ctx, input.Hash); err != nil {
+	}, func(_ context.Context, input *hashInput) (*emptyOutput, error) {
+		if err := session.Reannounce(input.Hash); err != nil {
 			return nil, huma.Error404NotFound(err.Error())
 		}
 		return &emptyOutput{}, nil
-	})
-
-	// First/last piece priority
-	huma.Register(api, huma.Operation{
-		OperationID: "set-first-last-priority",
-		Method:      http.MethodPost,
-		Path:        "/api/v1/torrents/{hash}/first-last-priority",
-		Summary:     "Prioritize first and last pieces for preview/streaming",
-		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *controlTorrentInput) (*emptyOutput, error) {
-		if err := session.SetFirstLastPriority(input.Hash, true); err != nil {
-			return nil, huma.Error404NotFound(err.Error())
-		}
-		return &emptyOutput{}, nil
-	})
-
-	// Alt speed toggle
-	huma.Register(api, huma.Operation{
-		OperationID: "toggle-alt-speed",
-		Method:      http.MethodPost,
-		Path:        "/api/v1/speed/alt/toggle",
-		Summary:     "Toggle alternative speed limits on/off",
-		Tags:        []string{"Speed"},
-	}, func(_ context.Context, _ *struct{}) (*struct {
-		Body struct {
-			AltSpeedActive bool `json:"alt_speed_active"`
-		}
-	}, error) {
-		current := session.IsAltSpeedActive()
-		session.SetAltSpeedEnabled(!current)
-		return &struct {
-			Body struct {
-				AltSpeedActive bool `json:"alt_speed_active"`
-			}
-		}{Body: struct {
-			AltSpeedActive bool `json:"alt_speed_active"`
-		}{AltSpeedActive: !current}}, nil
-	})
-
-	// Clear archived — remove all torrents in the "archived" category
-	huma.Register(api, huma.Operation{
-		OperationID: "clear-archived",
-		Method:      http.MethodDelete,
-		Path:        "/api/v1/torrents/archived",
-		Summary:     "Remove all archived (stalled) torrents",
-		Tags:        []string{"Torrents"},
-	}, func(ctx context.Context, _ *struct{}) (*struct {
-		Body struct {
-			Removed int `json:"removed"`
-		}
-	}, error) {
-		removed := session.ClearArchived(ctx)
-		return &struct {
-			Body struct {
-				Removed int `json:"removed"`
-			}
-		}{Body: struct {
-			Removed int `json:"removed"`
-		}{Removed: removed}}, nil
 	})
 }

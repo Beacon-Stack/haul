@@ -24,7 +24,6 @@ package v1
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -51,8 +50,8 @@ type setSettingsInput struct {
 // appropriate Session setter. This is what makes UI toggles actually take
 // effect at runtime. Keys that aren't in the dispatch table are persisted
 // to the DB (by the caller) but have no runtime effect — that's fine for
-// settings that only apply at startup (listen_port, network_interface,
-// etc.), but behavioral toggles must be dispatched here.
+// settings that only apply at startup (listen_port, etc.), but
+// behavioral toggles must be dispatched here.
 //
 // Returns a list of keys that had a runtime effect, for logging.
 func applyRuntimeSettings(session *torrent.Session, updates map[string]string) []string {
@@ -88,6 +87,24 @@ func applyRuntimeSettings(session *torrent.Session, updates map[string]string) [
 	return applied
 }
 
+// loadSettings reads the full settings table into a map.
+func loadSettings(db *sql.DB) (map[string]string, error) {
+	rows, err := db.Query(`SELECT key, value FROM settings ORDER BY key`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	settings := make(map[string]string)
+	for rows.Next() {
+		var k, v string
+		if rows.Scan(&k, &v) == nil {
+			settings[k] = v
+		}
+	}
+	return settings, rows.Err()
+}
+
 // RegisterSettingsRoutes registers the runtime settings API.
 func RegisterSettingsRoutes(api huma.API, db *sql.DB, session *torrent.Session) {
 	huma.Register(api, huma.Operation{
@@ -97,18 +114,9 @@ func RegisterSettingsRoutes(api huma.API, db *sql.DB, session *torrent.Session) 
 		Summary:     "Get runtime settings",
 		Tags:        []string{"Settings"},
 	}, func(_ context.Context, _ *struct{}) (*settingsOutput, error) {
-		rows, err := db.Query(`SELECT key, value FROM settings ORDER BY key`)
+		settings, err := loadSettings(db)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
-		}
-		defer rows.Close()
-
-		settings := make(map[string]string)
-		for rows.Next() {
-			var k, v string
-			if rows.Scan(&k, &v) == nil {
-				settings[k] = v
-			}
 		}
 		return &settingsOutput{Body: &settingsBody{Settings: settings}}, nil
 	})
@@ -132,47 +140,10 @@ func RegisterSettingsRoutes(api huma.API, db *sql.DB, session *torrent.Session) 
 		// this, the DB update is a phantom write.
 		_ = applyRuntimeSettings(session, input.Body.Settings)
 
-		// Return all settings.
-		rows, err := db.Query(`SELECT key, value FROM settings ORDER BY key`)
+		settings, err := loadSettings(db)
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
-		}
-		defer rows.Close()
-
-		settings := make(map[string]string)
-		for rows.Next() {
-			var k, v string
-			if rows.Scan(&k, &v) == nil {
-				settings[k] = v
-			}
 		}
 		return &settingsOutput{Body: &settingsBody{Settings: settings}}, nil
-	})
-
-	// Config dump — returns the effective startup config as JSON (secrets redacted).
-	huma.Register(api, huma.Operation{
-		OperationID: "get-config",
-		Method:      http.MethodGet,
-		Path:        "/api/v1/config",
-		Summary:     "Get effective startup configuration (secrets redacted)",
-		Tags:        []string{"Settings"},
-	}, func(_ context.Context, _ *struct{}) (*struct{ Body json.RawMessage }, error) {
-		// Settings table is the runtime overlay. The full config is from startup
-		// and isn't stored here — but the settings table is queryable.
-		rows, err := db.Query(`SELECT key, value FROM settings ORDER BY key`)
-		if err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
-		}
-		defer rows.Close()
-
-		settings := make(map[string]string)
-		for rows.Next() {
-			var k, v string
-			if rows.Scan(&k, &v) == nil {
-				settings[k] = v
-			}
-		}
-		data, _ := json.Marshal(settings)
-		return &struct{ Body json.RawMessage }{Body: data}, nil
 	})
 }

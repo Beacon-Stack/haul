@@ -97,7 +97,6 @@ type Info struct {
 	AddedAt      time.Time  `json:"added_at"`
 	CompletedAt  *time.Time `json:"completed_at,omitempty"`
 	ContentPath  string     `json:"content_path"`
-	Sequential   bool       `json:"sequential"`
 	Requester    string     `json:"requester,omitempty"` // "pilot" | "prism" | "manual" | ""
 
 	// Stalled is true when the backend's stall detector classifies this
@@ -157,31 +156,6 @@ type TrackerInfo struct {
 	URL  string `json:"url"`
 }
 
-// SwarmInfo surfaces anacrolix's TorrentGauges so callers can tell the
-// difference between "the swarm has 50 seeders but we only connected to 8"
-// (peer-discovery / dial-success problem) and "the swarm only has 8
-// seeders" (small swarm). The Info struct's `seeds`/`peers` fields are
-// only the connected slice; without these gauges, every download looks
-// like the swarm is small.
-type SwarmInfo struct {
-	// TotalPeers — every peer anacrolix has heard about across all sources
-	// (tracker announces, DHT, PEX). Includes peers we never actually
-	// dialed.
-	TotalPeers int `json:"total_peers"`
-	// PendingPeers — known but not yet dialed. If this stays large while
-	// ActivePeers stays tiny, anacrolix is rate-limiting outbound dials.
-	PendingPeers int `json:"pending_peers"`
-	// HalfOpenPeers — TCP/uTP handshake in flight. If this is the cap
-	// (TotalHalfOpenConns / 2 of MaxConnections), we're limited by the
-	// dial concurrency setting.
-	HalfOpenPeers int `json:"half_open_peers"`
-	// ActivePeers — fully connected, exchanging messages. Equal to
-	// len(PeerConns()) for v1.61.
-	ActivePeers int `json:"active_peers"`
-	// ConnectedSeeders — subset of ActivePeers with the full file.
-	ConnectedSeeders int `json:"connected_seeders"`
-}
-
 // AddRequest is the input for adding a new torrent.
 type AddRequest struct {
 	// URI is a magnet link, HTTP URL to a .torrent file, or empty if File is set.
@@ -196,8 +170,6 @@ type AddRequest struct {
 	Tags []string `json:"tags"`
 	// Paused starts the torrent in paused state.
 	Paused bool `json:"paused"`
-	// Sequential enables sequential download mode.
-	Sequential bool `json:"sequential"`
 	// Metadata holds optional media context from the requesting service (Pilot/Prism).
 	Metadata *RequesterMetadata `json:"metadata,omitempty"`
 }
@@ -655,10 +627,6 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 		savePath: savePath,
 	}
 
-	if req.Sequential {
-		t.SetDisplayName(t.Name())
-	}
-
 	s.mu.Lock()
 	s.torrents[hash] = mt
 	s.mu.Unlock()
@@ -680,7 +648,7 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 	s.logger.Info("torrent added", "hash", hash, "name", t.Name(), "source", source, "paused", req.Paused)
 
 	// Wait for metadata in background, then start.
-	go s.waitAndStart(mt, hash, req.Paused, req.Sequential, false /* verifyOnStart — fresh add, nothing to verify */)
+	go s.waitAndStart(mt, hash, req.Paused, false /* verifyOnStart — fresh add, nothing to verify */)
 
 	return s.torrentInfo(hash, mt), nil
 }
@@ -939,29 +907,6 @@ func (s *Session) persistTrackerChange(hash string, mt *managedTorrent) {
 	if _, err := s.db.Exec(`UPDATE torrents SET torrent_data = ? WHERE info_hash = ?`, buf.Bytes(), hash); err != nil {
 		s.logger.Error("failed to persist tracker change", "hash", hash, "error", err)
 	}
-}
-
-// Swarm returns anacrolix's swarm-level gauges: how many peers it knows
-// about vs how many it has fully connected. Used to diagnose
-// "swarm reports N seeders but we only connected to a few" cases — the
-// gap usually lives between PendingPeers (discovered, not dialed) and
-// HalfOpenPeers (dial in flight). Returns ("torrent not found") for an
-// unknown hash.
-func (s *Session) Swarm(hash string) (*SwarmInfo, error) {
-	s.mu.RLock()
-	mt, ok := s.torrents[hash]
-	s.mu.RUnlock()
-	if !ok {
-		return nil, fmt.Errorf("torrent not found: %s", hash)
-	}
-	g := mt.t.Stats().TorrentGauges
-	return &SwarmInfo{
-		TotalPeers:       g.TotalPeers,
-		PendingPeers:     g.PendingPeers,
-		HalfOpenPeers:    g.HalfOpenPeers,
-		ActivePeers:      g.ActivePeers,
-		ConnectedSeeders: g.ConnectedSeeders,
-	}, nil
 }
 
 // classifyPieceState flattens anacrolix's PieceState (which has overlapping
@@ -1708,7 +1653,7 @@ func classifyStalled(p stallParams) bool {
 }
 
 // waitAndStart waits for metadata then begins downloading.
-func (s *Session) waitAndStart(mt *managedTorrent, hash string, paused, sequential, verifyOnStart bool) {
+func (s *Session) waitAndStart(mt *managedTorrent, hash string, paused, verifyOnStart bool) {
 	<-mt.t.GotInfo()
 
 	// Mark as ready — safe to call Stats(), BytesMissing(), etc.
@@ -1745,10 +1690,6 @@ func (s *Session) waitAndStart(mt *managedTorrent, hash string, paused, sequenti
 		// uses the context to short-circuit the hash pass on cancel — which
 		// we don't do here; the pass runs to completion on startup.
 		_ = mt.t.VerifyDataContext(context.Background())
-	}
-
-	if sequential {
-		mt.t.SetDisplayName(mt.t.Name())
 	}
 
 	if !paused {
@@ -1849,17 +1790,16 @@ func (s *Session) persistTorrent(hash string, mt *managedTorrent) {
 	// monitorCompletion, and the requester_* fields come in via
 	// SetMetadata (separate write path).
 	_, err := s.db.Exec(`
-		INSERT INTO torrents (info_hash, name, save_path, category, added_at, sequential, resolution)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO torrents (info_hash, name, save_path, category, added_at, resolution)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT (info_hash) DO UPDATE SET
 			name = EXCLUDED.name,
 			save_path = EXCLUDED.save_path,
 			category = EXCLUDED.category,
 			added_at = EXCLUDED.added_at,
-			sequential = EXCLUDED.sequential,
 			resolution = EXCLUDED.resolution,
 			removed_at = NULL`,
-		hash, mt.t.Name(), mt.savePath, mt.category, mt.addedAt, false, parseResolution(mt.t.Name()),
+		hash, mt.t.Name(), mt.savePath, mt.category, mt.addedAt, parseResolution(mt.t.Name()),
 	)
 	if err != nil {
 		s.logger.Error("failed to persist torrent", "hash", hash, "error", err)
@@ -2104,7 +2044,7 @@ func (s *Session) restoreFromDB() error {
 		// bolt completion store. Protects against the "everything
 		// restarts from 0% after a restart" class of bugs where bolt
 		// state gets out of sync with the file on disk.
-		go s.waitAndStart(mt, r.hash, isStalled, false, true)
+		go s.waitAndStart(mt, r.hash, isStalled, true)
 		restored++
 		s.logger.Info("restored torrent", "hash", r.hash, "name", r.name)
 	}

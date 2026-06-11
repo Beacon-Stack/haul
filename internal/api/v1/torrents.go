@@ -76,16 +76,13 @@ type torrentListOutput struct {
 	Body []torrent.Info
 }
 
-type getTorrentInput struct {
-	Hash string `path:"hash" doc:"Torrent info hash"`
-}
-
 type deleteTorrentInput struct {
 	Hash        string `path:"hash"         doc:"Torrent info hash"`
 	DeleteFiles bool   `query:"delete_files" default:"false" doc:"Also delete downloaded files"`
 }
 
-type controlTorrentInput struct {
+// hashInput is the shared path input for every /torrents/{hash}/… operation.
+type hashInput struct {
 	Hash string `path:"hash" doc:"Torrent info hash"`
 }
 
@@ -103,10 +100,6 @@ type trackersOutput struct {
 	Body struct {
 		Trackers []torrent.TrackerInfo `json:"trackers"`
 	}
-}
-
-type swarmOutput struct {
-	Body *torrent.SwarmInfo
 }
 
 type emptyOutput struct {
@@ -130,7 +123,6 @@ type removeTrackerInput struct {
 
 // RegisterTorrentRoutes registers the /api/v1/torrents endpoints.
 func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
-	// List all torrents
 	huma.Register(api, huma.Operation{
 		OperationID: "list-torrents",
 		Method:      http.MethodGet,
@@ -141,14 +133,13 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 		return &torrentListOutput{Body: session.List()}, nil
 	})
 
-	// Get a single torrent
 	huma.Register(api, huma.Operation{
 		OperationID: "get-torrent",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/torrents/{hash}",
 		Summary:     "Get torrent details",
 		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *getTorrentInput) (*torrentOutput, error) {
+	}, func(_ context.Context, input *hashInput) (*torrentOutput, error) {
 		info, err := session.Get(input.Hash)
 		if err != nil {
 			return nil, huma.Error404NotFound(err.Error())
@@ -156,7 +147,6 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 		return &torrentOutput{Body: info}, nil
 	})
 
-	// Add a torrent
 	huma.Register(api, huma.Operation{
 		OperationID: "add-torrent",
 		Method:      http.MethodPost,
@@ -188,7 +178,6 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 		return &torrentOutput{Body: info}, nil
 	})
 
-	// Delete a torrent
 	huma.Register(api, huma.Operation{
 		OperationID: "delete-torrent",
 		Method:      http.MethodDelete,
@@ -202,28 +191,26 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 		return &emptyOutput{}, nil
 	})
 
-	// Pause a torrent
 	huma.Register(api, huma.Operation{
 		OperationID: "pause-torrent",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/torrents/{hash}/pause",
 		Summary:     "Pause a torrent",
 		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *controlTorrentInput) (*emptyOutput, error) {
+	}, func(_ context.Context, input *hashInput) (*emptyOutput, error) {
 		if err := session.Pause(input.Hash); err != nil {
 			return nil, huma.Error404NotFound(err.Error())
 		}
 		return &emptyOutput{}, nil
 	})
 
-	// Resume a torrent
 	huma.Register(api, huma.Operation{
 		OperationID: "resume-torrent",
 		Method:      http.MethodPost,
 		Path:        "/api/v1/torrents/{hash}/resume",
 		Summary:     "Resume a paused torrent",
 		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *controlTorrentInput) (*emptyOutput, error) {
+	}, func(_ context.Context, input *hashInput) (*emptyOutput, error) {
 		if err := session.Resume(input.Hash); err != nil {
 			return nil, huma.Error404NotFound(err.Error())
 		}
@@ -237,7 +224,7 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 		Path:        "/api/v1/torrents/{hash}/peers",
 		Summary:     "List connected peers for a torrent",
 		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *getTorrentInput) (*peersOutput, error) {
+	}, func(_ context.Context, input *hashInput) (*peersOutput, error) {
 		peers, err := session.Peers(input.Hash)
 		if err != nil {
 			return nil, huma.Error404NotFound(err.Error())
@@ -254,7 +241,7 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 		Path:        "/api/v1/torrents/{hash}/pieces",
 		Summary:     "Piece-state snapshot (run-length encoded)",
 		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *getTorrentInput) (*piecesOutput, error) {
+	}, func(_ context.Context, input *hashInput) (*piecesOutput, error) {
 		pieces, err := session.Pieces(input.Hash)
 		if err != nil {
 			return nil, huma.Error404NotFound(err.Error())
@@ -274,7 +261,7 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 		Path:        "/api/v1/torrents/{hash}/trackers",
 		Summary:     "Configured tracker list (no live announce status)",
 		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *getTorrentInput) (*trackersOutput, error) {
+	}, func(_ context.Context, input *hashInput) (*trackersOutput, error) {
 		trackers, err := session.Trackers(input.Hash)
 		if err != nil {
 			return nil, huma.Error404NotFound(err.Error())
@@ -314,22 +301,5 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 			return nil, huma.Error404NotFound(err.Error())
 		}
 		return &emptyOutput{}, nil
-	})
-
-	// Swarm gauges — diagnoses "tracker says N seeders but we connected
-	// to far fewer" by exposing TotalPeers / PendingPeers / HalfOpenPeers
-	// alongside ActivePeers.
-	huma.Register(api, huma.Operation{
-		OperationID: "get-torrent-swarm",
-		Method:      http.MethodGet,
-		Path:        "/api/v1/torrents/{hash}/swarm",
-		Summary:     "Swarm-level peer gauges (known / pending / dialing / connected)",
-		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *getTorrentInput) (*swarmOutput, error) {
-		swarm, err := session.Swarm(input.Hash)
-		if err != nil {
-			return nil, huma.Error404NotFound(err.Error())
-		}
-		return &swarmOutput{Body: swarm}, nil
 	})
 }

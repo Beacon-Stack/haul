@@ -96,20 +96,6 @@ func (s *Session) RemoveTags(hash string, tags []string) error {
 	return nil
 }
 
-// SetSpeedLimits sets per-torrent speed limits (bytes/s, 0 = unlimited).
-func (s *Session) SetSpeedLimits(hash string, downloadLimit, uploadLimit int) error {
-	s.mu.RLock()
-	_, ok := s.torrents[hash]
-	s.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("torrent not found: %s", hash)
-	}
-
-	_, err := s.db.Exec(`UPDATE torrents SET download_limit = ?, upload_limit = ? WHERE info_hash = ?`,
-		downloadLimit, uploadLimit, hash)
-	return err
-}
-
 // SetSeedLimits sets per-torrent seed ratio and time limits.
 func (s *Session) SetSeedLimits(hash string, ratioLimit float64, timeLimitSecs int) error {
 	s.mu.RLock()
@@ -143,19 +129,6 @@ func (s *Session) SetPriority(hash string, priority int) error {
 
 	s.enforceMaxActiveDownloads(context.Background())
 	return nil
-}
-
-// SetSequential toggles sequential download mode.
-func (s *Session) SetSequential(hash string, sequential bool) error {
-	s.mu.RLock()
-	_, ok := s.torrents[hash]
-	s.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("torrent not found: %s", hash)
-	}
-
-	_, err := s.db.Exec(`UPDATE torrents SET sequential = ? WHERE info_hash = ?`, sequential, hash)
-	return err
 }
 
 // SetLocation moves a torrent's data to a new save path.
@@ -228,34 +201,6 @@ func (s *Session) GetFiles(hash string) ([]FileInfo, error) {
 		})
 	}
 	return result, nil
-}
-
-// SetFilePriority sets the download priority for a specific file.
-func (s *Session) SetFilePriority(hash string, fileIndex int, priority string) error {
-	s.mu.RLock()
-	mt, ok := s.torrents[hash]
-	s.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("torrent not found: %s", hash)
-	}
-
-	files := mt.t.Files()
-	if fileIndex < 0 || fileIndex >= len(files) {
-		return fmt.Errorf("file index out of range: %d", fileIndex)
-	}
-
-	f := files[fileIndex]
-	switch priority {
-	case "skip":
-		f.SetPriority(0)
-	case "normal":
-		f.SetPriority(4)
-	case "high":
-		f.SetPriority(7)
-	default:
-		return fmt.Errorf("invalid priority: %s (use skip, normal, or high)", priority)
-	}
-	return nil
 }
 
 // Recheck re-verifies all pieces of a torrent.
@@ -363,25 +308,6 @@ func (s *Session) applySeedAction(ctx context.Context, hash, action string, data
 	})
 }
 
-// ClearArchived removes all torrents with category "archived" and returns the count.
-func (s *Session) ClearArchived(ctx context.Context) int {
-	s.mu.RLock()
-	var archived []string
-	for hash, mt := range s.torrents {
-		if mt.category == "archived" {
-			archived = append(archived, hash)
-		}
-	}
-	s.mu.RUnlock()
-
-	for _, hash := range archived {
-		_ = s.Remove(ctx, hash, true)
-	}
-
-	s.logger.Info("cleared archived torrents", "count", len(archived))
-	return len(archived)
-}
-
 // GetArchivedCount returns the number of torrents in the "archived" category.
 func (s *Session) GetArchivedCount() int {
 	s.mu.RLock()
@@ -409,42 +335,18 @@ func (s *Session) ForceStart(hash string) error {
 	return nil
 }
 
-// Reannounce forces a tracker reannounce for a torrent.
-func (s *Session) Reannounce(ctx context.Context, hash string) error {
+// Reannounce forces a fresh announce to every tracker by restarting the
+// torrent's announcers. ModifyTrackers stops the existing tracker
+// scrapers and starts new ones, which announce immediately; Metainfo()
+// clones the live announce list, so runtime-added trackers survive.
+func (s *Session) Reannounce(hash string) error {
 	s.mu.RLock()
 	mt, ok := s.torrents[hash]
 	s.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("torrent not found: %s", hash)
 	}
-	// Anacrolix doesn't expose a direct reannounce, but dropping and re-adding
-	// tracker URLs triggers fresh announces. Verifying data also causes tracker activity.
-	_ = mt.t.VerifyDataContext(ctx)
-	return nil
-}
-
-// SetFirstLastPriority prioritizes the first and last pieces of each file
-// for preview/streaming purposes.
-func (s *Session) SetFirstLastPriority(hash string, enabled bool) error {
-	s.mu.RLock()
-	mt, ok := s.torrents[hash]
-	s.mu.RUnlock()
-	if !ok {
-		return fmt.Errorf("torrent not found: %s", hash)
-	}
-
-	info := mt.t.Info()
-	if info == nil {
-		return nil
-	}
-
-	files := mt.t.Files()
-	for _, f := range files {
-		if enabled {
-			// Prioritize first and last pieces of each file.
-			f.SetPriority(7) // high priority for the file
-		}
-	}
+	mt.t.ModifyTrackers(mt.t.Metainfo().AnnounceList)
 	return nil
 }
 

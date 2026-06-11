@@ -13,15 +13,6 @@ type healthOutput struct {
 	Body *torrent.HealthReport
 }
 
-type setMetadataInput struct {
-	Hash string `path:"hash" doc:"Torrent info hash"`
-	Body torrent.RequesterMetadata
-}
-
-type metadataOutput struct {
-	Body *torrent.RequesterMetadata
-}
-
 type stallOutput struct {
 	Body *torrent.StallInfo
 }
@@ -43,39 +34,12 @@ func RegisterHealthRoutes(api huma.API, session *torrent.Session) {
 	})
 
 	huma.Register(api, huma.Operation{
-		OperationID: "set-torrent-metadata",
-		Method:      http.MethodPut,
-		Path:        "/api/v1/torrents/{hash}/metadata",
-		Summary:     "Set requester metadata (Beacon integration)",
-		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *setMetadataInput) (*emptyOutput, error) {
-		if err := session.SetMetadata(input.Hash, input.Body); err != nil {
-			return nil, huma.Error404NotFound(err.Error())
-		}
-		return &emptyOutput{}, nil
-	})
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-torrent-metadata",
-		Method:      http.MethodGet,
-		Path:        "/api/v1/torrents/{hash}/metadata",
-		Summary:     "Get requester metadata",
-		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *controlTorrentInput) (*metadataOutput, error) {
-		meta, err := session.GetMetadata(input.Hash)
-		if err != nil {
-			return nil, huma.Error404NotFound(err.Error())
-		}
-		return &metadataOutput{Body: meta}, nil
-	})
-
-	huma.Register(api, huma.Operation{
 		OperationID: "get-torrent-stall",
 		Method:      http.MethodGet,
 		Path:        "/api/v1/torrents/{hash}/stall",
 		Summary:     "Get stall detection info",
 		Tags:        []string{"Torrents"},
-	}, func(_ context.Context, input *controlTorrentInput) (*stallOutput, error) {
+	}, func(_ context.Context, input *hashInput) (*stallOutput, error) {
 		info, err := session.GetStallInfo(input.Hash)
 		if err != nil {
 			return nil, huma.Error404NotFound(err.Error())

@@ -30,8 +30,8 @@ type peerServicesOutput struct {
 		// in Pulse's registry. Map keeps the wire payload small and
 		// gives the UI an O(1) lookup by requester string. API keys
 		// are intentionally NOT exposed here — keep them server-side
-		// only. Backend handlers that need to call siblings use the
-		// in-memory peerCache below, which holds the keys.
+		// only; handlers that call siblings fetch keys via
+		// Integration.DiscoverWithKeys (see research.go).
 		Services map[string]string `json:"services"`
 	}
 }

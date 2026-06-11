@@ -44,7 +44,7 @@ func RegisterTagRoutes(api huma.API, svc *tag.Service) {
 		Tags:        []string{"Tags"},
 	}, func(_ context.Context, input *tagDeleteInput) (*emptyOutput, error) {
 		if err := svc.DeleteTag(input.Tag); err != nil {
-			return nil, huma.Error500InternalServerError(err.Error())
+			return nil, huma.Error404NotFound(err.Error())
 		}
 		return &emptyOutput{}, nil
 	})
