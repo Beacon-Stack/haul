@@ -1,9 +1,5 @@
 package config
 
-import (
-	"github.com/beacon-stack/haul/internal/version"
-)
-
 // Config holds all application configuration.
 // Values are loaded from config.yaml and can be overridden by
 // HAUL_* environment variables (e.g. HAUL_SERVER_PORT=8484).
@@ -66,10 +62,6 @@ type TorrentConfig struct {
 	WatchDir string `mapstructure:"watch_dir"`
 	// MaxActiveDownloads is the max concurrent downloading torrents. 0 = unlimited.
 	MaxActiveDownloads int `mapstructure:"max_active_downloads"`
-	// MaxActiveUploads is the max concurrent seeding torrents. 0 = unlimited.
-	MaxActiveUploads int `mapstructure:"max_active_uploads"`
-	// MaxActiveTorrents is the combined max concurrent active torrents. 0 = unlimited.
-	MaxActiveTorrents int `mapstructure:"max_active_torrents"`
 	// GlobalDownloadLimit is the global download speed limit in bytes/s. 0 = unlimited.
 	GlobalDownloadLimit int `mapstructure:"global_download_limit"`
 	// GlobalUploadLimit is the global upload speed limit in bytes/s. 0 = unlimited.
@@ -98,34 +90,16 @@ type TorrentConfig struct {
 	MaxConnections int `mapstructure:"max_connections"`
 	// MaxConnectionsPerTorrent is the per-torrent max connections. 0 = unlimited.
 	MaxConnectionsPerTorrent int `mapstructure:"max_connections_per_torrent"`
-	// NetworkInterface binds peer connections to a specific interface (e.g. "tun0", "wg0").
-	NetworkInterface string `mapstructure:"network_interface"`
-	// IncompleteFileExtension appends this extension to incomplete files (e.g. ".haul").
-	IncompleteFileExtension string `mapstructure:"incomplete_file_ext"`
-	// ContentLayout controls file organization: "original", "subfolder", "no_subfolder".
-	ContentLayout string `mapstructure:"content_layout"`
-	// SlowTorrentThreshold is the download rate (bytes/s) below which a torrent is "slow". Default 2048.
-	SlowTorrentThreshold int `mapstructure:"slow_torrent_threshold"`
-	// IgnoreSlowTorrents doesn't count slow torrents toward queue limits.
-	IgnoreSlowTorrents bool `mapstructure:"ignore_slow_torrents"`
 	// StallTimeout is the seconds of no data before a torrent is considered stalled. Default 120.
 	StallTimeout int `mapstructure:"stall_timeout"`
 	// PauseOnComplete immediately pauses torrents when download finishes. No seeding.
 	PauseOnComplete bool `mapstructure:"pause_on_complete"`
-	// PreAllocate pre-allocates disk space for new torrents.
-	PreAllocate bool `mapstructure:"pre_allocate"`
 	// OnAddCommand runs this shell command when a torrent is added.
 	// Supports %h (hash), %n (name), %c (category).
 	OnAddCommand string `mapstructure:"on_add_command"`
 	// OnCompleteCommand runs this shell command when a torrent completes.
 	// Supports %h (hash), %n (name), %p (path), %c (category).
 	OnCompleteCommand string `mapstructure:"on_complete_command"`
-	// AsyncIOThreads is the number of threads for async disk I/O. Default: 10.
-	AsyncIOThreads int `mapstructure:"async_io_threads"`
-	// FilePoolSize is the max number of simultaneously open files. Default: 100.
-	FilePoolSize int `mapstructure:"file_pool_size"`
-	// AnnounceToAllTrackers announces to all trackers, not just the first working one. Default: false.
-	AnnounceToAllTrackers bool `mapstructure:"announce_to_all_trackers"`
 	// RenameOnComplete renames files on download completion when media metadata is available.
 	RenameOnComplete bool `mapstructure:"rename_on_complete"`
 	// EpisodeFormat is the filename template for TV episodes.
@@ -180,9 +154,4 @@ type AdminConfig struct {
 // table for RetentionDays days, then a daily sweep hard-deletes them.
 type CleanupConfig struct {
 	RetentionDays int `mapstructure:"retention_days"`
-}
-
-// AppName returns the application name constant for use in config paths.
-func AppName() string {
-	return version.AppName
 }
