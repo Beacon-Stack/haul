@@ -1,10 +1,13 @@
-.PHONY: build check lint test run
+.PHONY: build check lint test run web
 
 build:
-	go build -o haul ./cmd/haul
+	go build -o bin/haul ./cmd/haul
 
 run: build
-	./haul
+	./bin/haul
+
+web:
+	cd web/ui && npm run build
 
 lint:
 	golangci-lint run ./...
@@ -13,4 +16,4 @@ test:
 	go test ./...
 
 check: lint test
-	@echo "✓ all checks passed"
+	@echo "all checks passed"

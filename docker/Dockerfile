@@ -51,10 +51,9 @@ RUN apk add --no-cache ca-certificates tzdata && \
 COPY --from=builder /haul /usr/local/bin/haul
 
 # Beacon-stack-shaped defaults — the published image expects to land in a
-# compose with services named `postgres` and (optionally) `pulse`. For
-# standalone use, override these via the container's `environment:` block;
-# env always beats Dockerfile ENV. See docker/docker-compose.yml for the
-# standalone recipe.
+# compose with a service named `pulse`. For standalone use, override these
+# via the container's `environment:` block; env always beats Dockerfile ENV.
+# See docker/docker-compose.yml for the standalone recipe.
 ENV HAUL_DATABASE_PATH=/config/haul.db \
     HAUL_PULSE_URL=http://pulse:9696 \
     HAUL_TORRENT_LISTEN_PORT=6881 \

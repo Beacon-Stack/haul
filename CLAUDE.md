@@ -5,17 +5,16 @@
 Standard Beacon Go app layout:
 - `cmd/haul/main.go` — entry point
 - `internal/` — core business logic
-- `web/` — embedded React SPA
-- `pkg/` — shared/public packages
+- `web/` — embedded React SPA (source in `web/ui`, built assets in `web/static`)
 
 ## Development
 
 ```bash
 # Build
-go build -o haul ./cmd/haul
+make build   # outputs bin/haul
 
 # Run
-./haul
+./bin/haul
 
 # Lint + type check
 make check
@@ -32,9 +31,12 @@ Haul runs in Docker behind a VPN container. The frontend is embedded into the Go
 2. Rebuild the Docker image (embeds `web/static/` into the Go binary)
 
 ```bash
-# From haul root — rebuild frontend then Docker
-cd web/ui && npm run build && cd ../../docker
-docker compose build --no-cache haul && docker compose up -d haul
+# From haul root — rebuild frontend, then rebuild the image from the
+# deploy repo's compose (the tracked docker/docker-compose.yml pulls the
+# published image and has no build stanza).
+cd web/ui && npm run build && cd ../..
+docker build -f docker/Dockerfile -t ghcr.io/beacon-stack/haul:latest .
+# then restart the container from your compose setup
 ```
 
 Editing `.tsx` source files alone won't update the served UI — `web/static/` must be regenerated first.
@@ -42,9 +44,9 @@ Editing `.tsx` source files alone won't update the served UI — `web/static/` m
 ## Conventions
 
 - Always work on feature branches, never directly on `main`
-- Pre-push checks: `make check` (golangci-lint + TypeScript compile)
+- Pre-push checks: `make check` (golangci-lint + go test); for UI changes also `cd web/ui && npm run build`
 - App name is a top-level constant in `internal/version/version.go` — use it everywhere
-- Follow the same patterns as Prism and Pulse (Chi + Huma, sqlc, Goose, Viper)
+- Follow the same patterns as Prism and Pulse (Chi + Huma, Goose, Viper)
 - Port: 8484
 
 ## Regression guard: torrent stalls
@@ -61,7 +63,7 @@ regression suite exists to catch every failure mode we've seen —
 - `internal/config/load.go` (env var BindEnv, torrent.* defaults)
 - `cmd/haul/main.go` (the `stallTicker` wiring — if this goroutine isn't
   running, stall detection is silently disabled)
-- `../docker/docker-compose.yml` (haul service env, VPN ports)
+- the deploy repo compose (haul service env, VPN ports)
 
 ### The dead-torrent regression suite
 
@@ -108,7 +110,7 @@ tags, no `-short` gating — they're cheap and need to run every time.
 - `TestApplyRuntimeSettings_PauseOnComplete` — asserts the PUT /api/v1/settings
   handler actually dispatches `pause_on_complete` to the live Session via
   `SetPauseOnComplete`. Before this test existed, the UI toggle was a
-  phantom write: it persisted to the Postgres `settings` table but nothing
+  phantom write: it persisted to the `settings` table but nothing
   in the torrent engine ever read that table, so the toggle never took
   effect at runtime.
 - `TestApplyRuntimeSettings_AlsoAcceptsOne` — "1" is truthy alongside "true".
