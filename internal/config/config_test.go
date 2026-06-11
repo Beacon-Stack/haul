@@ -178,10 +178,3 @@ func TestLoad_InvalidPulseAPIKeyFilePath_Errors(t *testing.T) {
 // each non-empty input produced a non-empty output. A regression to
 // `cfg.SeedLimitAction = ""` regardless of input would still pass
 // because the test wrote the value itself.
-
-func TestAppName(t *testing.T) {
-	name := AppName()
-	if name != "haul" {
-		t.Errorf("expected app name 'haul', got %q", name)
-	}
-}

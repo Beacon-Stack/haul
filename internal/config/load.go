@@ -48,14 +48,8 @@ func Load(cfgFile string) (*Config, error) {
 	v.SetDefault("torrent.encryption", "prefer")
 	v.SetDefault("torrent.max_connections", 500)
 	v.SetDefault("torrent.max_connections_per_torrent", 100)
-	v.SetDefault("torrent.content_layout", "original")
 	v.SetDefault("torrent.seed_limit_action", "pause")
-	v.SetDefault("torrent.slow_torrent_threshold", 2048)
-	v.SetDefault("torrent.ignore_slow_torrents", false)
 	v.SetDefault("torrent.stall_timeout", 120)
-	v.SetDefault("torrent.async_io_threads", 10)
-	v.SetDefault("torrent.file_pool_size", 100)
-	v.SetDefault("torrent.announce_to_all_trackers", false)
 	// torrent.pause_on_complete and torrent.rename_on_complete must be
 	// registered via SetDefault so Viper's AutomaticEnv picks up
 	// HAUL_TORRENT_PAUSE_ON_COMPLETE / HAUL_TORRENT_RENAME_ON_COMPLETE.
