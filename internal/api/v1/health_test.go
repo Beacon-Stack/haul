@@ -87,7 +87,11 @@ func TestGetTorrentStall_UnknownHashReturns404(t *testing.T) {
 // expects (`stalled`, `level`, `inactive_secs`, `reason`).
 func TestGetTorrentStall_NoPeersEverShape(t *testing.T) {
 	prev1 := torrent.SetFirstPeerTimeoutForTesting(10 * time.Millisecond)
-	t.Cleanup(func() { torrent.SetFirstPeerTimeoutForTesting(prev1) })
+	prev2 := torrent.SetSessionStartupGraceForTesting(0) // disable: humatest setup is sub-millisecond
+	t.Cleanup(func() {
+		torrent.SetFirstPeerTimeoutForTesting(prev1)
+		torrent.SetSessionStartupGraceForTesting(prev2)
+	})
 
 	session, api := newHealthAPI(t)
 	hash := session.AddNoPeersTorrentForTesting("seed-no-peers-stall0", time.Now().Add(-1*time.Second))

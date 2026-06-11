@@ -101,6 +101,43 @@ func (s *Session) AddNoPeersTorrentForTesting(seed string, addedAt time.Time) st
 	return hashHex
 }
 
+// stallTimeoutDuration returns the configured stall timeout,
+// defaulting to 120s.
+func (s *Session) stallTimeoutDuration() time.Duration {
+	t := s.cfg.StallTimeout
+	if t <= 0 {
+		t = 120
+	}
+	return time.Duration(t) * time.Second
+}
+
+// stallFor classifies one managed torrent at time now via classifyStall.
+// mt.t may be nil for test-seeded torrents; engine stats are only read
+// once metadata is ready, which is also when they become meaningful.
+func (s *Session) stallFor(mt *managedTorrent, now time.Time) StallInfo {
+	status := StatusDownloading
+	if mt.paused {
+		status = StatusPaused
+	}
+	p := stallParams{
+		now:              now,
+		status:           status,
+		sessionStartedAt: s.startedAt,
+		addedAt:          mt.addedAt,
+		firstPeerAt:      mt.firstPeerAt,
+		lastActivityAt:   mt.lastActivityAt,
+		stallTimeout:     s.stallTimeoutDuration(),
+	}
+	if mt.ready.Load() && mt.t != nil {
+		stats := mt.t.Stats()
+		p.hasInfo = true
+		p.bytesMissing = mt.t.BytesMissing()
+		p.activePeers = stats.ActivePeers
+		p.connectedSeeders = stats.ConnectedSeeders
+	}
+	return classifyStall(p)
+}
+
 // StallInfo holds stall detection data for a torrent.
 type StallInfo struct {
 	Stalled      bool       `json:"stalled"`
@@ -129,11 +166,6 @@ func (s *Session) CheckStalls(ctx context.Context) {
 	// Skip the entire pass during the session startup grace window.
 	if time.Since(s.startedAt) < sessionStartupGrace {
 		return
-	}
-
-	stallTimeout := s.cfg.StallTimeout
-	if stallTimeout <= 0 {
-		stallTimeout = 120
 	}
 
 	s.mu.RLock()
@@ -167,23 +199,41 @@ func (s *Session) CheckStalls(ctx context.Context) {
 			s.mu.Unlock()
 		}
 
-		// ── Class 1: no peers ever ─────────────────────────────────────
-		// This is the primary dead-torrent signal. It works for both
-		// metadata-less magnets (mt.ready.Load() == false, BytesMissing == 0)
-		// AND for .torrent files that arrived but found no peers.
-		if mt.firstPeerAt == nil && now.Sub(mt.addedAt) > firstPeerTimeout {
-			ageSecs := int64(now.Sub(mt.addedAt).Seconds())
+		// ── Activity bookkeeping ───────────────────────────────────────
+		// CheckStalls is the writer of lastActivityAt: record download
+		// progress before classifying. Only meaningful once metadata has
+		// arrived (BytesReadData needs a real transfer).
+		if mt.ready.Load() {
+			bytesRead := stats.ConnStats.BytesReadData.Int64()
+			s.mu.Lock()
+			if mt.lastBytesRead != bytesRead {
+				mt.lastBytesRead = bytesRead
+				mt.lastActivityAt = now
+			}
+			s.mu.Unlock()
+		}
+
+		st := s.stallFor(mt, now)
+		if !st.Stalled {
+			continue
+		}
+
+		switch st.Level {
+		case StallNoPeersEver:
+			// The primary dead-torrent signal: added more than
+			// firstPeerTimeout ago, never observed a single peer. Works
+			// for metadata-less magnets AND .torrent files with no swarm.
 			s.logger.Warn("stall: no peers ever observed, classifying as dead",
-				"hash", hash, "age_secs", ageSecs, "ready", mt.ready.Load())
+				"hash", hash, "age_secs", st.InactiveSecs, "ready", mt.ready.Load())
 
 			s.bus.Publish(ctx, events.Event{
 				Type:     events.TypeTorrentStalled,
 				InfoHash: hash,
 				Data: map[string]any{
 					"name":          nameOrEmpty(mt),
-					"inactive_secs": ageSecs,
-					"reason":        ReasonNoPeersEver,
-					"level":         int(StallNoPeersEver),
+					"inactive_secs": st.InactiveSecs,
+					"reason":        st.Reason,
+					"level":         int(st.Level),
 					"peers":         0,
 					"seeders":       0,
 					"ready":         mt.ready.Load(),
@@ -194,65 +244,12 @@ func (s *Session) CheckStalls(ctx context.Context) {
 			// (Pilot's stallwatcher) decide whether to remove + blocklist.
 			// Continuing to publish the event on each tick is fine — Pilot
 			// dedups by info_hash in its blocklist.
-			continue
-		}
 
-		// ── Class 2: activity-based escalation (needs metadata) ────────
-		// Everything below here requires the torrent to have metadata,
-		// because it relies on BytesMissing() and bytes-received progress.
-		if !mt.ready.Load() || mt.t.BytesMissing() == 0 {
-			continue
-		}
-
-		bytesRead := stats.ConnStats.BytesReadData.Int64()
-
-		// Update last activity if data was received.
-		s.mu.Lock()
-		if mt.lastBytesRead != bytesRead {
-			mt.lastBytesRead = bytesRead
-			mt.lastActivityAt = now
-		}
-		lastActivity := mt.lastActivityAt
-		s.mu.Unlock()
-
-		// A torrent that has metadata but never received a byte yet falls
-		// through the class-1 check above (firstPeerAt != nil but bytesRead
-		// never ticked). Use the later of firstPeerAt and addedAt as the
-		// reference for "when did you last have activity" so we don't
-		// penalize freshly-added torrents that are mid-handshake.
-		if lastActivity.IsZero() {
-			lastActivity = mt.addedAt
-			if mt.firstPeerAt != nil && mt.firstPeerAt.After(lastActivity) {
-				lastActivity = *mt.firstPeerAt
-			}
-		}
-
-		inactiveSecs := int64(now.Sub(lastActivity).Seconds())
-		if inactiveSecs < int64(stallTimeout) {
-			continue
-		}
-
-		// Determine stall level.
-		level := StallLevel1
-		if inactiveSecs >= 300 {
-			level = StallLevel3
-		} else if inactiveSecs >= int64(stallTimeout*2) {
-			level = StallLevel2
-		}
-
-		reason := ReasonNoDataReceived
-		if stats.ActivePeers == 0 {
-			reason = ReasonNoPeers
-		} else if stats.ConnectedSeeders == 0 {
-			reason = ReasonNoSeeders
-		}
-
-		switch level {
 		case StallLevel1:
-			s.logger.Debug("stall level 1: reannouncing", "hash", hash, "inactive_secs", inactiveSecs)
+			s.logger.Debug("stall level 1: reannouncing", "hash", hash, "inactive_secs", st.InactiveSecs)
 
 		case StallLevel2:
-			s.logger.Info("stall level 2: force DHT re-query", "hash", hash, "inactive_secs", inactiveSecs)
+			s.logger.Info("stall level 2: force DHT re-query", "hash", hash, "inactive_secs", st.InactiveSecs)
 
 		case StallLevel3:
 			// Auto-pause (not drop): keep the torrent in the engine + the
@@ -268,7 +265,7 @@ func (s *Session) CheckStalls(ctx context.Context) {
 				continue
 			}
 
-			s.logger.Warn("stall level 3: pausing stalled torrent", "hash", hash, "inactive_secs", inactiveSecs, "reason", reason)
+			s.logger.Warn("stall level 3: pausing stalled torrent", "hash", hash, "inactive_secs", st.InactiveSecs, "reason", st.Reason)
 
 			if err := s.Pause(hash); err != nil {
 				s.logger.Warn("stall level 3: pause failed", "hash", hash, "error", err)
@@ -301,9 +298,9 @@ func (s *Session) CheckStalls(ctx context.Context) {
 				InfoHash: hash,
 				Data: map[string]any{
 					"name":          nameOrEmpty(mt),
-					"inactive_secs": inactiveSecs,
-					"reason":        reason,
-					"level":         int(level),
+					"inactive_secs": st.InactiveSecs,
+					"reason":        st.Reason,
+					"level":         int(st.Level),
 					"peers":         stats.ActivePeers,
 					"seeders":       stats.ConnectedSeeders,
 					// archived flag retained for compatibility with the
@@ -318,7 +315,9 @@ func (s *Session) CheckStalls(ctx context.Context) {
 	}
 }
 
-// GetStallInfo returns stall information for a specific torrent.
+// GetStallInfo returns stall information for a specific torrent. Unlike
+// the bulk ListStalled it also carries the inactivity counters for
+// torrents that haven't crossed the stall threshold yet.
 func (s *Session) GetStallInfo(hash string) (*StallInfo, error) {
 	s.mu.RLock()
 	mt, ok := s.torrents[hash]
@@ -327,68 +326,8 @@ func (s *Session) GetStallInfo(hash string) (*StallInfo, error) {
 		return nil, fmt.Errorf("torrent not found: %s", hash)
 	}
 
-	now := time.Now()
-
-	// Pre-metadata "no peers ever" path.
-	if mt.firstPeerAt == nil && now.Sub(mt.addedAt) > firstPeerTimeout {
-		ageSecs := int64(now.Sub(mt.addedAt).Seconds())
-		return &StallInfo{
-			Stalled:      true,
-			Level:        StallNoPeersEver,
-			InactiveSecs: ageSecs,
-			Reason:       ReasonNoPeersEver,
-		}, nil
-	}
-
-	// Pre-activity / pre-metadata with no stall yet.
-	if !mt.ready.Load() || mt.t.BytesMissing() == 0 {
-		return &StallInfo{Stalled: false}, nil
-	}
-
-	stallTimeout := s.cfg.StallTimeout
-	if stallTimeout <= 0 {
-		stallTimeout = 120
-	}
-
-	lastActivity := mt.lastActivityAt
-	if lastActivity.IsZero() {
-		lastActivity = mt.addedAt
-		if mt.firstPeerAt != nil && mt.firstPeerAt.After(lastActivity) {
-			lastActivity = *mt.firstPeerAt
-		}
-	}
-
-	inactiveSecs := int64(now.Sub(lastActivity).Seconds())
-	if inactiveSecs < int64(stallTimeout) {
-		return &StallInfo{
-			Stalled:      false,
-			InactiveSecs: inactiveSecs,
-			LastActivity: &lastActivity,
-		}, nil
-	}
-
-	level := StallLevel1
-	if inactiveSecs >= int64(stallTimeout*5) {
-		level = StallLevel3
-	} else if inactiveSecs >= int64(stallTimeout*2) {
-		level = StallLevel2
-	}
-
-	reason := ReasonNoDataReceived
-	stats := mt.t.Stats()
-	if stats.ActivePeers == 0 {
-		reason = ReasonNoPeers
-	} else if stats.ConnectedSeeders == 0 {
-		reason = ReasonNoSeeders
-	}
-
-	return &StallInfo{
-		Stalled:      true,
-		Level:        level,
-		InactiveSecs: inactiveSecs,
-		LastActivity: &lastActivity,
-		Reason:       reason,
-	}, nil
+	st := s.stallFor(mt, time.Now())
+	return &st, nil
 }
 
 // StalledTorrent pairs a torrent's identity with its current stall status.
@@ -430,57 +369,16 @@ func (s *Session) ListStalled() []StalledTorrent {
 			continue
 		}
 
-		// Pre-metadata "no peers ever" path.
-		if mt.firstPeerAt == nil && now.Sub(mt.addedAt) > firstPeerTimeout {
-			out = append(out, StalledTorrent{
-				InfoHash:     hash,
-				Name:         nameOrEmpty(mt),
-				Level:        StallNoPeersEver,
-				Reason:       ReasonNoPeersEver,
-				InactiveSecs: int64(now.Sub(mt.addedAt).Seconds()),
-				AddedAt:      mt.addedAt,
-			})
+		st := s.stallFor(mt, now)
+		if !st.Stalled {
 			continue
-		}
-
-		// Activity-based: require metadata and at least one undownloaded piece.
-		if !mt.ready.Load() || mt.t.BytesMissing() == 0 {
-			continue
-		}
-		lastActivity := mt.lastActivityAt
-		if lastActivity.IsZero() {
-			lastActivity = mt.addedAt
-			if mt.firstPeerAt != nil && mt.firstPeerAt.After(lastActivity) {
-				lastActivity = *mt.firstPeerAt
-			}
-		}
-		stallTimeout := s.cfg.StallTimeout
-		if stallTimeout <= 0 {
-			stallTimeout = 120
-		}
-		inactive := int64(now.Sub(lastActivity).Seconds())
-		if inactive < int64(stallTimeout) {
-			continue
-		}
-		level := StallLevel1
-		if inactive >= 300 {
-			level = StallLevel3
-		} else if inactive >= int64(stallTimeout*2) {
-			level = StallLevel2
-		}
-		reason := ReasonNoDataReceived
-		stats := mt.t.Stats()
-		if stats.ActivePeers == 0 {
-			reason = ReasonNoPeers
-		} else if stats.ConnectedSeeders == 0 {
-			reason = ReasonNoSeeders
 		}
 		out = append(out, StalledTorrent{
 			InfoHash:     hash,
 			Name:         nameOrEmpty(mt),
-			Level:        level,
-			Reason:       reason,
-			InactiveSecs: inactive,
+			Level:        st.Level,
+			Reason:       st.Reason,
+			InactiveSecs: st.InactiveSecs,
 			AddedAt:      mt.addedAt,
 		})
 	}
