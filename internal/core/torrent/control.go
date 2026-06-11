@@ -22,6 +22,20 @@ type FileInfo struct {
 	Progress float64 `json:"progress"`
 }
 
+// categorySavePath returns the category's configured save path, or ""
+// when the category doesn't exist, has no save path, or the session has
+// no DB (tests).
+func (s *Session) categorySavePath(category string) string {
+	if s.db == nil || category == "" {
+		return ""
+	}
+	var p string
+	if err := s.db.QueryRow(`SELECT save_path FROM categories WHERE name = ?`, category).Scan(&p); err != nil {
+		return ""
+	}
+	return p
+}
+
 // SetCategory assigns a category to a torrent.
 func (s *Session) SetCategory(hash, category string) error {
 	s.mu.Lock()
