@@ -129,6 +129,38 @@ describe("TorrentList Stalled filter pill", () => {
     expect(stalledPillCount()).toBe(2);
   });
 
+  it("REGRESSION: auto-paused stalled torrents stay visible in the default Active view", () => {
+    // Haul auto-pauses a stalled torrent (status flips to "paused" with
+    // stalled_at set). The default view is Active — and before the fix,
+    // matchesStatus("active") excluded stalled_at torrents, so a dead
+    // torrent silently vanished from the main page while the manager
+    // services (Pilot/Prism) stayed blocked on it. The row must remain
+    // visible, wearing its red Stalled badge.
+    torrentState.value = [
+      makeTorrent({ info_hash: "dead", name: "vanishing-dead-torrent", status: "paused", stalled_at: new Date().toISOString() }),
+      makeTorrent({ info_hash: "healthy", name: "healthy-download", status: "downloading" }),
+    ];
+    renderList();
+    expect(screen.getByText("vanishing-dead-torrent")).toBeInTheDocument();
+    expect(screen.getByText("healthy-download")).toBeInTheDocument();
+  });
+
+  it("lights the Stalled pill in its warning colour whenever the count is non-zero", () => {
+    // Unselected pills are muted gray; the Stalled pill is the exception —
+    // with a non-zero count it keeps the stalled status colour so it can't
+    // blend into the pill row.
+    torrentState.value = [
+      makeTorrent({ info_hash: "dead", status: "downloading", stalled: true }),
+    ];
+    renderList();
+    const pill = screen
+      .getAllByRole("button")
+      .find((b) => /^\s*Stalled\s*\d+\s*$/.test(b.textContent ?? ""));
+    expect(pill).toBeDefined();
+    expect(pill!.style.color).toContain("--color-status-stalled");
+    expect(pill!.style.fontWeight).toBe("600");
+  });
+
   it("ignores stalled=true on non-downloading torrents", () => {
     // Defensive — matchesStatus("stalled") is `t.status === "downloading"
     // && t.stalled`. If someone removes the status guard, a paused-with-

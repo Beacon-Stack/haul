@@ -62,7 +62,12 @@ function isFinished(t: TorrentInfo): boolean {
 
 function matchesStatus(t: TorrentInfo, filter: StatusFilter): boolean {
   switch (filter) {
-    case "active":      return !isFinished(t) && !t.stalled_at;
+    // Stalled torrents stay in the default Active view. Haul auto-pausing a
+    // dead torrent must not make it vanish — a stalled download is a problem
+    // the user needs to see, and hiding it while user-paused torrents stayed
+    // visible left managers (Pilot/Prism) blocked on grabs the user couldn't
+    // find. The row still wears the red "Stalled" badge via torrentVisual().
+    case "active":      return !isFinished(t);
     case "downloading": return t.status === "downloading" && !t.stalled_at;
     case "seeding":     return t.status === "seeding";
     case "completed":   return isFinished(t);
@@ -741,6 +746,11 @@ export default function TorrentList() {
         {STATUS_FILTERS.map(({ key, label, color }) => {
           const count = torrents ? countForStatus(torrents, key) : 0;
           const active = statusFilters.has(key);
+          // The Stalled pill demands attention whenever anything is stalled:
+          // it keeps its warning colour even when unselected, so a non-zero
+          // stalled count never blends into the muted-gray pill row.
+          const attention = key === "stalled" && count > 0;
+          const lit = active || attention;
           return (
             <button
               key={key}
@@ -766,11 +776,11 @@ export default function TorrentList() {
                 gap: 6,
                 padding: "5px 12px",
                 borderRadius: 6,
-                border: active ? `1px solid ${color}` : "1px solid var(--color-border-default)",
+                border: lit ? `1px solid ${color}` : "1px solid var(--color-border-default)",
                 background: active ? `color-mix(in srgb, ${color} 12%, transparent)` : "transparent",
-                color: active ? color : "var(--color-text-muted)",
+                color: lit ? color : "var(--color-text-muted)",
                 fontSize: 12,
-                fontWeight: active ? 600 : 400,
+                fontWeight: lit ? 600 : 400,
                 cursor: "pointer",
                 opacity: count === 0 && key !== "active" ? 0.5 : 1,
               }}
@@ -779,13 +789,13 @@ export default function TorrentList() {
                 width: 6,
                 height: 6,
                 borderRadius: "50%",
-                background: active ? color : "var(--color-text-muted)",
+                background: lit ? color : "var(--color-text-muted)",
               }} />
               {label}
               <span style={{
                 fontSize: 10,
                 fontWeight: 600,
-                color: active ? color : "var(--color-text-muted)",
+                color: lit ? color : "var(--color-text-muted)",
                 minWidth: 14,
                 textAlign: "center",
               }}>
