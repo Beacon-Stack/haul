@@ -230,6 +230,26 @@ func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {
 		return &emptyOutput{}, nil
 	})
 
+	// Retry restoring an errored torrent (BUG-005). Re-runs the
+	// chmod-and-AddTorrent flow on demand; surfaces the refreshed Info
+	// on success or 409 with the new error message on failure.
+	huma.Register(api, huma.Operation{
+		OperationID: "retry-torrent",
+		Method:      http.MethodPost,
+		Path:        "/api/v1/torrents/{hash}/retry",
+		Summary:     "Retry an errored torrent",
+		Tags:        []string{"Torrents"},
+	}, func(_ context.Context, input *controlTorrentInput) (*torrentOutput, error) {
+		info, err := session.RetryRestore(input.Hash)
+		if err != nil {
+			if strings.HasPrefix(err.Error(), "torrent not found") {
+				return nil, huma.Error404NotFound(err.Error())
+			}
+			return nil, huma.Error409Conflict(err.Error())
+		}
+		return &torrentOutput{Body: info}, nil
+	})
+
 	// List connected peers for a torrent.
 	huma.Register(api, huma.Operation{
 		OperationID: "list-torrent-peers",

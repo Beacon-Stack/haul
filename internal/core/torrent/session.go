@@ -16,12 +16,15 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"log/slog"
 	"math"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -72,6 +75,11 @@ const (
 	StatusQueued      Status = "queued"
 	StatusCompleted   Status = "completed"
 	StatusFailed      Status = "failed"
+	// StatusError is set when restoreFromDB couldn't re-attach the torrent
+	// to the anacrolix engine (e.g. file permission denied, missing mount,
+	// corrupted resume data). The torrent row stays in the DB so the user
+	// can see why and click Retry. See TODO.md BUG-005.
+	StatusError Status = "error"
 )
 
 // Info is the external representation of a torrent.
@@ -113,6 +121,11 @@ type Info struct {
 	// attention until they resume it. Resume clears StalledAt and
 	// removes the auto-applied 'stalled' tag.
 	StalledAt *time.Time `json:"stalled_at,omitempty"`
+
+	// Error is set when Status == StatusError. Surfaces the underlying
+	// restore failure (e.g. "permission denied: file.mkv") so the UI can
+	// show the user what went wrong and offer Retry.
+	Error string `json:"error,omitempty"`
 }
 
 // PeerInfo is the external representation of a single connected peer.
@@ -279,6 +292,18 @@ type managedTorrent struct {
 	// makes those accesses race-free without forcing every reader
 	// to take the session lock.
 	ready atomic.Bool
+
+	// restoreError is non-empty when restoreFromDB couldn't re-attach
+	// this torrent to the anacrolix engine. When set, t is nil and the
+	// torrent surfaces with Status=StatusError so the user can Retry.
+	// Cleared by retryRestore on a successful re-add. Guarded by s.mu.
+	restoreError string
+
+	// cachedName mirrors the DB `name` column so an errored torrent
+	// (where t is nil) can still surface a human-readable name in the
+	// UI without an extra DB roundtrip. Set by restoreFromDB and the
+	// retry path; ignored for healthy torrents (we use t.Name() there).
+	cachedName string
 
 	// Rate trackers convert anacrolix's cumulative byte counters into
 	// smoothed bytes-per-second values by sampling on every getInfo call.
@@ -1048,13 +1073,20 @@ func (s *Session) Remove(ctx context.Context, hash string, deleteFiles bool) err
 	// DB cleanup must run regardless of what Drop() does. Defer first.
 	defer s.deleteTorrent(hash)
 
-	mt.t.Drop()
+	// Errored torrents have no anacrolix handle — Drop would nil-panic.
+	// The DB row is the only artifact in that case, and the defer
+	// above takes care of it.
+	if mt.t != nil {
+		mt.t.Drop()
+	}
 
 	if deleteFiles {
 		// Best-effort deletion of downloaded content.
 		contentPath := mt.savePath
-		if info := mt.t.Info(); info != nil {
-			contentPath = fmt.Sprintf("%s/%s", mt.savePath, info.BestName())
+		if mt.t != nil {
+			if info := mt.t.Info(); info != nil {
+				contentPath = fmt.Sprintf("%s/%s", mt.savePath, info.BestName())
+			}
 		}
 		_ = os.RemoveAll(contentPath)
 	}
@@ -1463,6 +1495,28 @@ func (s *Session) torrentInfo(hash string, mt *managedTorrent) (result *Info) {
 			}
 		}
 	}()
+
+	// Errored torrents have no anacrolix handle — return a minimal Info
+	// carrying the error message so the UI can render the Retry/Remove
+	// affordance. Must short-circuit before touching mt.t below.
+	if mt.restoreError != "" {
+		name := hash
+		if mt.cachedName != "" {
+			name = mt.cachedName
+		}
+		return &Info{
+			InfoHash:  hash,
+			Name:      name,
+			Status:    StatusError,
+			SavePath:  mt.savePath,
+			Category:  mt.category,
+			Tags:      mt.tags,
+			AddedAt:   mt.addedAt,
+			StalledAt: mt.stalledAt,
+			Requester: mt.requester,
+			Error:     mt.restoreError,
+		}
+	}
 
 	t := mt.t
 
@@ -1987,7 +2041,7 @@ func (s *Session) restoreFromDB() error {
 	}
 	defer rows.Close()
 
-	var restored, cleaned int
+	var restored, cleaned, errored int
 	for rows.Next() {
 		var hash, name, savePath, category, requester string
 		var addedAt time.Time
@@ -2021,23 +2075,8 @@ func (s *Session) restoreFromDB() error {
 			continue
 		}
 
-		t, addErr := s.client.AddTorrent(mi)
-		if addErr != nil {
-			s.logger.Warn("failed to re-add torrent, removing", "hash", hash, "error", addErr)
-			s.deleteTorrent(hash)
-			cleaned++
-			continue
-		}
-
-		t.AddTrackers(DefaultPublicTrackers)
-
-		// A torrent that was auto-paused by the stall watcher before
-		// restart comes back paused so the user keeps seeing it on
-		// the "needs attention" rail. tags are loaded from the
-		// torrent_tags table below to preserve the auto-applied
-		// 'stalled' tag (and any user-applied tags).
-		isStalled := stalledAt != nil
-
+		// Tags load before the AddTorrent decision so the same set is
+		// applied whether we end up in the success or error branch.
 		var tags []string
 		if rows2, terr := s.db.Query(`SELECT tag FROM torrent_tags WHERE info_hash = $1`, hash); terr == nil {
 			for rows2.Next() {
@@ -2049,15 +2088,62 @@ func (s *Session) restoreFromDB() error {
 			rows2.Close()
 		}
 
+		// A torrent that was auto-paused by the stall watcher before
+		// restart comes back paused so the user keeps seeing it on
+		// the "needs attention" rail.
+		isStalled := stalledAt != nil
+
+		t, addErr := s.client.AddTorrent(mi)
+		if addErr != nil && isPermissionDenied(addErr) {
+			// The most common cause is anacrolix's own behavior: it
+			// chmods completed files inside a multi-file torrent to
+			// 0o444 on promotion (storage/file-piece.go:259 in the
+			// anacrolix repo), then can't re-open them for read+write
+			// on the next restart. Walk the fileset, clear the
+			// read-only bit, and retry once. See TODO.md BUG-005.
+			if s.healFilesetPermissions(mi, savePath, hash) {
+				t, addErr = s.client.AddTorrent(mi)
+			}
+		}
+		if addErr != nil {
+			errMsg := addErr.Error()
+			s.logger.Warn("failed to re-add torrent, marking as error",
+				"hash", hash, "name", name, "error", errMsg)
+			s.persistRestoreError(hash, errMsg)
+
+			mt := &managedTorrent{
+				category:     category,
+				savePath:     savePath,
+				tags:         tags,
+				addedAt:      addedAt,
+				stalledAt:    stalledAt,
+				requester:    requester,
+				cachedName:   name,
+				restoreError: errMsg,
+			}
+			s.mu.Lock()
+			s.torrents[hash] = mt
+			s.mu.Unlock()
+			errored++
+			continue
+		}
+
+		// Successful add — clear any stale error_message from a prior
+		// failed restore so the row doesn't keep claiming it's broken.
+		s.persistRestoreError(hash, "")
+
+		t.AddTrackers(DefaultPublicTrackers)
+
 		mt := &managedTorrent{
-			t:         t,
-			paused:    isStalled,
-			category:  category,
-			savePath:  savePath,
-			tags:      tags,
-			addedAt:   addedAt,
-			stalledAt: stalledAt,
-			requester: requester,
+			t:          t,
+			paused:     isStalled,
+			category:   category,
+			savePath:   savePath,
+			tags:       tags,
+			addedAt:    addedAt,
+			stalledAt:  stalledAt,
+			requester:  requester,
+			cachedName: name,
 		}
 
 		s.mu.Lock()
@@ -2074,8 +2160,171 @@ func (s *Session) restoreFromDB() error {
 		s.logger.Info("restored torrent", "hash", hash, "name", name)
 	}
 
-	if restored > 0 || cleaned > 0 {
-		s.logger.Info("torrent restore complete", "restored", restored, "cleaned", cleaned)
+	if restored > 0 || cleaned > 0 || errored > 0 {
+		s.logger.Info("torrent restore complete",
+			"restored", restored, "cleaned", cleaned, "errored", errored)
 	}
 	return rows.Err()
+}
+
+// RetryRestore re-attempts a failed restore for the given hash. Used by
+// the /api/v1/torrents/{hash}/retry endpoint when the user clicks Retry
+// on an errored row. Same auto-heal + fallthrough behavior as the
+// startup restore path. Returns the refreshed Info or an error.
+//
+// Returns "torrent not found" when the hash isn't in s.torrents. Errors
+// from the underlying AddTorrent are surfaced verbatim so the HTTP
+// layer can show them to the user.
+func (s *Session) RetryRestore(hash string) (*Info, error) {
+	s.mu.RLock()
+	mt, ok := s.torrents[hash]
+	s.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("torrent not found: %s", hash)
+	}
+	if mt.restoreError == "" {
+		// Not in error state — nothing to retry. Return current info so
+		// the UI just refreshes the row instead of erroring.
+		return s.torrentInfo(hash, mt), nil
+	}
+
+	if s.db == nil {
+		return nil, fmt.Errorf("retry unavailable: db disconnected")
+	}
+
+	var torrentData []byte
+	var savePath, name string
+	err := s.db.QueryRow(
+		`SELECT torrent_data, save_path, name FROM torrents WHERE info_hash = $1`,
+		hash,
+	).Scan(&torrentData, &savePath, &name)
+	if err != nil {
+		return nil, fmt.Errorf("loading torrent for retry: %w", err)
+	}
+	if len(torrentData) == 0 {
+		return nil, fmt.Errorf("retry impossible: no resume data on disk")
+	}
+
+	mi, parseErr := metainfo.Load(bytes_reader(torrentData))
+	if parseErr != nil {
+		return nil, fmt.Errorf("parsing resume data: %w", parseErr)
+	}
+
+	t, addErr := s.client.AddTorrent(mi)
+	if addErr != nil && isPermissionDenied(addErr) {
+		if s.healFilesetPermissions(mi, savePath, hash) {
+			t, addErr = s.client.AddTorrent(mi)
+		}
+	}
+	if addErr != nil {
+		// Update the persisted message — same auto-heal happened, same
+		// outcome. The user will see the new error in the UI on the
+		// next list refresh.
+		newMsg := addErr.Error()
+		s.persistRestoreError(hash, newMsg)
+		s.mu.Lock()
+		mt.restoreError = newMsg
+		s.mu.Unlock()
+		return nil, addErr
+	}
+
+	t.AddTrackers(DefaultPublicTrackers)
+	s.persistRestoreError(hash, "")
+
+	s.mu.Lock()
+	mt.t = t
+	mt.restoreError = ""
+	mt.cachedName = name
+	isStalled := mt.stalledAt != nil
+	mt.paused = isStalled
+	s.mu.Unlock()
+
+	go s.waitAndStart(mt, hash, isStalled, false, true)
+	s.logger.Info("retry restore succeeded", "hash", hash, "name", name)
+	return s.torrentInfo(hash, mt), nil
+}
+
+// isPermissionDenied detects the error string anacrolix surfaces when
+// any file in a torrent's fileset can't be opened for read+write. The
+// underlying error is wrapped multiple times, so errors.Is against
+// fs.ErrPermission misses most real cases — substring is more reliable
+// here than the stdlib's error chain.
+func isPermissionDenied(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		return true
+	}
+	return strings.Contains(err.Error(), "permission denied")
+}
+
+// healFilesetPermissions walks the saved metainfo's file list and clears
+// the owner write bit on any file that's currently mode 0o444 (or any
+// other write-denied mode). This undoes anacrolix's promote-to-read-only
+// chmod so its restore code can reopen the file for r+w. Returns true if
+// at least one file was healed — caller uses that signal to decide
+// whether to retry AddTorrent.
+//
+// We re-grant write only to the owner (0o200), not group/other, so we
+// don't widen permissions beyond what anacrolix originally created.
+func (s *Session) healFilesetPermissions(mi *metainfo.MetaInfo, savePath, hash string) bool {
+	info, err := mi.UnmarshalInfo()
+	if err != nil {
+		s.logger.Warn("auto-heal: could not parse metainfo", "hash", hash, "error", err)
+		return false
+	}
+
+	healed := 0
+	walk := func(path string) {
+		st, err := os.Stat(path)
+		if err != nil {
+			return
+		}
+		if st.Mode().IsDir() {
+			return
+		}
+		if st.Mode().Perm()&0o200 != 0 {
+			return
+		}
+		newMode := st.Mode().Perm() | 0o200
+		if chmodErr := os.Chmod(path, newMode); chmodErr != nil {
+			s.logger.Info("auto-heal: chmod failed", "path", path, "error", chmodErr)
+			return
+		}
+		healed++
+		s.logger.Info("auto-heal: cleared read-only bit", "path", path)
+	}
+
+	files := info.UpvertedFiles()
+	if len(files) == 0 {
+		// Single-file torrent: the file lives directly under savePath
+		// with info.Name as the basename.
+		walk(filepath.Join(savePath, info.Name))
+	} else {
+		for _, f := range files {
+			parts := append([]string{savePath, info.Name}, f.Path...)
+			walk(filepath.Join(parts...))
+		}
+	}
+
+	if healed > 0 {
+		s.logger.Info("auto-heal: cleared read-only on fileset", "hash", hash, "count", healed)
+		return true
+	}
+	return false
+}
+
+// persistRestoreError writes the error message column. Empty string
+// clears it. Errors from the DB are logged but don't bubble — the
+// caller is already in a degraded path and an unwritable DB just means
+// the restore-error state won't survive the next restart, which is
+// strictly less bad than refusing the entire restore.
+func (s *Session) persistRestoreError(hash, msg string) {
+	if s.db == nil {
+		return
+	}
+	if _, err := s.db.Exec(`UPDATE torrents SET error_message = $1 WHERE info_hash = $2`, msg, hash); err != nil {
+		s.logger.Warn("could not persist error_message", "hash", hash, "error", err)
+	}
 }

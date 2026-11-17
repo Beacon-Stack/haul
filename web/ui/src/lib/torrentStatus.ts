@@ -26,7 +26,8 @@ export type TorrentVisualKey =
   | "completed"
   | "paused"
   | "queued"
-  | "failed";
+  | "failed"
+  | "error";
 
 export interface TorrentVisual {
   key: TorrentVisualKey;
@@ -44,6 +45,11 @@ const VISUALS: Record<TorrentVisualKey, TorrentVisual> = {
   paused:      { key: "paused",      label: "Paused",      color: "var(--color-status-paused)" },
   queued:      { key: "queued",      label: "Queued",      color: "var(--color-status-queued)" },
   failed:      { key: "failed",      label: "Failed",      color: "var(--color-status-failed)" },
+  // `error` is the BUG-005 state: torrent exists in Haul's DB but anacrolix
+  // couldn't (re-)attach it on restart. Shares the red of `failed` since
+  // both mean "broken, needs user attention"; the row's tooltip surfaces
+  // the underlying message and offers Retry.
+  error:       { key: "error",       label: "Error",       color: "var(--color-status-failed)" },
 };
 
 // torrentVisual returns the canonical (label, color) for a torrent.
@@ -70,6 +76,8 @@ export function torrentVisual(t: Pick<TorrentInfo, "status" | "stalled" | "stall
       return VISUALS.queued;
     case "failed":
       return VISUALS.failed;
+    case "error":
+      return VISUALS.error;
     default:
       // Unknown status — fall back to "downloading" colours rather than crash.
       // If you see this in the wild, something on the backend has emitted a

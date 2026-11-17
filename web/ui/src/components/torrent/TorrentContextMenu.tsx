@@ -25,6 +25,7 @@ import {
   Play,
   Zap,
   RefreshCw,
+  RotateCcw,
   Radio,
   FolderOpen,
   Tag as TagIcon,
@@ -38,6 +39,7 @@ import {
   type TorrentInfo,
   usePauseTorrent,
   useResumeTorrent,
+  useRetryTorrent,
   useDeleteTorrent,
   useForceStartTorrent,
   useRecheckTorrent,
@@ -71,6 +73,7 @@ export default function TorrentContextMenu({ target, onClose, onOpenSubmodal }: 
 
   const pause = usePauseTorrent();
   const resume = useResumeTorrent();
+  const retry = useRetryTorrent();
   const del = useDeleteTorrent();
   const forceStart = useForceStartTorrent();
   const recheck = useRecheckTorrent();
@@ -124,9 +127,13 @@ export default function TorrentContextMenu({ target, onClose, onOpenSubmodal }: 
   };
 
   const isPaused = t.status === "paused";
+  const isErrored = t.status === "error";
   const isStalled = !!t.stalled_at;
-  const canPause = !isPaused;
-  const canResume = isPaused;
+  // Errored torrents have no live anacrolix handle — pause/resume/force-
+  // start/recheck/reannounce are all no-ops or panics on the backend.
+  // Hide them and surface Retry instead. See TODO.md BUG-005.
+  const canPause = !isPaused && !isErrored;
+  const canResume = isPaused && !isErrored;
   const isComplete = t.status === "completed" || t.status === "seeding";
 
   const handleCopy = (label: string, value: string) => {
@@ -200,6 +207,18 @@ export default function TorrentContextMenu({ target, onClose, onOpenSubmodal }: 
       onContextMenu={(e) => e.preventDefault()}
     >
       {/* Status group */}
+      {isErrored && (
+        <Item
+          icon={RotateCcw}
+          label="Retry"
+          onClick={run(() =>
+            retry.mutate(t.info_hash, {
+              onSuccess: () => toast.success("Retry succeeded"),
+              onError: (e) => toast.error((e as Error).message),
+            }),
+          )}
+        />
+      )}
       {canResume && (
         <Item
           icon={Play}
@@ -224,16 +243,18 @@ export default function TorrentContextMenu({ target, onClose, onOpenSubmodal }: 
           )}
         />
       )}
-      <Item
-        icon={Zap}
-        label="Force start (bypass queue)"
-        onClick={run(() =>
-          forceStart.mutate(t.info_hash, {
-            onSuccess: () => toast.success("Force-started"),
-            onError: (e) => toast.error((e as Error).message),
-          }),
-        )}
-      />
+      {!isErrored && (
+        <Item
+          icon={Zap}
+          label="Force start (bypass queue)"
+          onClick={run(() =>
+            forceStart.mutate(t.info_hash, {
+              onSuccess: () => toast.success("Force-started"),
+              onError: (e) => toast.error((e as Error).message),
+            }),
+          )}
+        />
+      )}
 
       {/* Re-search — gated on stalled + arr-requested. The most useful
           action when a torrent has gone dead, so it lives near the top. */}
@@ -259,20 +280,24 @@ export default function TorrentContextMenu({ target, onClose, onOpenSubmodal }: 
         </>
       )}
 
-      <Divider />
+      {!isErrored && (
+        <>
+          <Divider />
 
-      {/* Engine actions */}
-      <Item icon={RefreshCw} label="Force recheck…" onClick={handleRecheck} />
-      <Item
-        icon={Radio}
-        label="Force reannounce"
-        onClick={run(() =>
-          reannounce.mutate(t.info_hash, {
-            onSuccess: () => toast.success("Reannounced to trackers"),
-            onError: (e) => toast.error((e as Error).message),
-          }),
-        )}
-      />
+          {/* Engine actions */}
+          <Item icon={RefreshCw} label="Force recheck…" onClick={handleRecheck} />
+          <Item
+            icon={Radio}
+            label="Force reannounce"
+            onClick={run(() =>
+              reannounce.mutate(t.info_hash, {
+                onSuccess: () => toast.success("Reannounced to trackers"),
+                onError: (e) => toast.error((e as Error).message),
+              }),
+            )}
+          />
+        </>
+      )}
 
       <Divider />
 

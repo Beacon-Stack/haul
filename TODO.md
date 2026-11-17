@@ -26,6 +26,24 @@
 
 ---
 
+### BUG-005: anacrolix-torrent promotes completed files to 0o444 — WORKAROUND IN PLACE
+
+**Root cause (in anacrolix, not ours):** `storage/file-piece.go:259` in `github.com/anacrolix/torrent` does `os.Chmod(f.safeOsPath, filePerm&^0o222)` right after renaming `.part` → final name. Every file inside a multi-file torrent (and every single-file torrent) is left at `0o444` on completion. The library's own log message calls this "setting promoted file to read-only."
+
+**Why it bites us:** On any Haul restart (apt upgrade, image redeploy, crash), anacrolix's restore opens every file in the saved fileset for read+**write** to set up storage. The chmod the library itself applied makes that open fail with `permission denied`. `client.AddTorrent` returns an error and — until BUG-005's workaround — Haul's restore loop in `session.go` called `s.deleteTorrent(hash)`, wiping in-progress download state for the rest of the torrent (e.g. losing E01/E02 progress because E03 was complete-and-locked).
+
+**Workaround (this bug):**
+- `session.go` restore loop no longer deletes on `AddTorrent` failure.
+- On permission-denied errors, walk the saved fileset, `chmod u+w` any `0o444` files, retry `AddTorrent` once. anacrolix will re-apply `0o444` after re-verification, but the storage handle opens cleanly the second time.
+- On any other failure (or if the retry still fails), the torrent stays in the DB with `status='error'` and an error message; the UI surfaces a Retry/Remove affordance.
+
+**Cleaner fix to revisit:**
+- Upstream PR or option to make the read-only promotion configurable. Check whether anacrolix already exposes a `StorageOption` we missed.
+- Alternative: ship our own `storage.ClientImpl` that doesn't chmod on promotion. The interface is small (`OpenTorrent`, `Piece`, `Flush`).
+- Either path lets us delete the chmod-and-retry dance and the `'error'` status code from the restore path.
+
+---
+
 ## Feature Gaps
 
 ### Pilot media management settings UI

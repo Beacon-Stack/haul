@@ -37,6 +37,11 @@ export interface TorrentInfo {
   // | "manual" | "" / undefined. UI uses this to gate features like
   // "Re-search via Pilot" that only make sense for arr-requested grabs.
   requester?: string;
+  // Non-empty when status === "error" (BUG-005): captures the underlying
+  // reason the restore couldn't re-attach this torrent to the engine.
+  // Used by the queue row to show the failure inline and decide which
+  // actions to offer.
+  error?: string;
 }
 
 export interface TorrentFile {
@@ -231,6 +236,20 @@ export function useResumeTorrent() {
   return useMutation({
     mutationFn: (hash: string) =>
       apiFetch(`/torrents/${hash}/resume`, { method: "POST" }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents"] }),
+  });
+}
+
+// useRetryTorrent re-attempts a failed restore for an errored torrent
+// (BUG-005). Backend re-runs the chmod-and-AddTorrent flow; on success
+// the torrent rejoins the live engine and the row's status flips back
+// to downloading/paused. On failure the new error message is persisted
+// and surfaced on the next poll.
+export function useRetryTorrent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (hash: string) =>
+      apiFetch(`/torrents/${hash}/retry`, { method: "POST" }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["torrents"] }),
   });
 }

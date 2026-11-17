@@ -1,9 +1,9 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { Plus, Pause, Play, Trash2, Search, Download, Upload, HardDrive, GripVertical, Shield, ShieldOff, FileUp, X } from "lucide-react";
+import { Plus, Pause, Play, Trash2, Search, Download, Upload, HardDrive, GripVertical, Shield, ShieldOff, FileUp, X, RotateCcw, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { useConfirm } from "@beacon-shared/ConfirmDialog";
-import { useTorrents, useAddTorrent, useDeleteTorrent, usePauseTorrent, useResumeTorrent, useReorderTorrents, useSetTorrentPriority, useSetTorrentCategory, useAddTorrentTags, useRemoveTorrentTags, useSetTorrentLocation, type TorrentInfo } from "@/api/torrents";
+import { useTorrents, useAddTorrent, useDeleteTorrent, usePauseTorrent, useResumeTorrent, useRetryTorrent, useReorderTorrents, useSetTorrentPriority, useSetTorrentCategory, useAddTorrentTags, useRemoveTorrentTags, useSetTorrentLocation, type TorrentInfo } from "@/api/torrents";
 import TorrentContextMenu, { type ContextMenuTarget } from "@/components/torrent/TorrentContextMenu";
 import { useHealth } from "@/api/health";
 import { useSettings } from "@/api/settings";
@@ -364,6 +364,7 @@ function TorrentCard({ t, draggable, onContextMenu }: {
 }) {
   const pause = usePauseTorrent();
   const resume = useResumeTorrent();
+  const retry = useRetryTorrent();
   const del = useDeleteTorrent();
   const confirm = useConfirm();
 
@@ -450,22 +451,38 @@ function TorrentCard({ t, draggable, onContextMenu }: {
           {t.name}
         </Link>
 
-        <span style={{
-          fontSize: 10,
-          padding: "2px 8px",
-          borderRadius: 4,
-          fontWeight: 600,
-          flexShrink: 0,
-          background: `color-mix(in srgb, ${visual.color} 15%, transparent)`,
-          color: visual.color,
-          textTransform: "uppercase",
-          letterSpacing: "0.04em",
-        }}>
+        <span
+          title={t.status === "error" && t.error ? t.error : undefined}
+          style={{
+            fontSize: 10,
+            padding: "2px 8px",
+            borderRadius: 4,
+            fontWeight: 600,
+            flexShrink: 0,
+            background: `color-mix(in srgb, ${visual.color} 15%, transparent)`,
+            color: visual.color,
+            textTransform: "uppercase",
+            letterSpacing: "0.04em",
+            // Errored badges get a subtle pointer cursor so users discover
+            // the inline tooltip explaining what broke. No other status
+            // carries hover content, so this is a focused affordance.
+            cursor: t.status === "error" && t.error ? "help" : "default",
+          }}
+        >
           {visual.label}
         </span>
 
         <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
-          {t.status === "paused" ? (
+          {t.status === "error" ? (
+            <button
+              onClick={() => retry.mutate(t.info_hash)}
+              title={`Retry${t.error ? ` — last failure: ${t.error}` : ""}`}
+              disabled={retry.isPending}
+              style={iconBtnStyle}
+            >
+              <RotateCcw size={14} />
+            </button>
+          ) : t.status === "paused" ? (
             <button onClick={() => resume.mutate(t.info_hash)} title="Resume" style={iconBtnStyle}><Play size={14} /></button>
           ) : (
             <button onClick={() => pause.mutate(t.info_hash)} title="Pause" style={iconBtnStyle}><Pause size={14} /></button>
@@ -473,6 +490,26 @@ function TorrentCard({ t, draggable, onContextMenu }: {
           <button onClick={handleRemove} title="Remove" style={{ ...iconBtnStyle, color: "var(--color-danger)" }}><Trash2 size={14} /></button>
         </div>
       </div>
+
+      {/* Inline error banner for restore failures. Visible only when in
+          the error state. Surfaces the message so the user knows what
+          broke without having to mouse over the badge or open detail. */}
+      {t.status === "error" && t.error && (
+        <div style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 8,
+          margin: "8px 16px 0",
+          padding: "8px 12px",
+          background: "color-mix(in srgb, var(--color-status-failed) 10%, transparent)",
+          borderRadius: 6,
+          fontSize: 12,
+          color: "var(--color-text-muted)",
+        }}>
+          <AlertTriangle size={14} style={{ color: "var(--color-status-failed)", flexShrink: 0, marginTop: 1 }} />
+          <span style={{ wordBreak: "break-word" }}>{t.error}</span>
+        </div>
+      )}
 
       {/* Row 2: Stats grid — evenly distributed */}
       <div style={{

@@ -134,6 +134,11 @@ func TestRemove_DeleteTorrentRunsInDefer(t *testing.T) {
 
 	// Walk the body in order. We want to see a `defer s.deleteTorrent(...)`
 	// statement BEFORE the `mt.t.Drop()` call. Anything else is a regression.
+	//
+	// The Drop call may be wrapped in `if mt.t != nil { ... }` since
+	// errored torrents (per BUG-005) have no anacrolix handle. Look one
+	// level into if-blocks so the nil guard doesn't hide the call from
+	// this regression check.
 	deferIdx, dropIdx := -1, -1
 	for i, stmt := range removeFn.Body.List {
 		if isDeferDeleteTorrent(stmt) {
@@ -144,6 +149,17 @@ func TestRemove_DeleteTorrentRunsInDefer(t *testing.T) {
 		if isMtDropCall(stmt) {
 			if dropIdx < 0 {
 				dropIdx = i
+			}
+			continue
+		}
+		if ifStmt, ok := stmt.(*ast.IfStmt); ok && ifStmt.Body != nil {
+			for _, inner := range ifStmt.Body.List {
+				if isMtDropCall(inner) {
+					if dropIdx < 0 {
+						dropIdx = i
+					}
+					break
+				}
 			}
 		}
 	}

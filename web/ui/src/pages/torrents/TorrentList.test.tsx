@@ -52,6 +52,7 @@ vi.mock("@/api/torrents", async () => {
     useDeleteTorrent: () => ({ mutate: vi.fn() }),
     usePauseTorrent: () => ({ mutate: vi.fn() }),
     useResumeTorrent: () => ({ mutate: vi.fn() }),
+    useRetryTorrent: () => ({ mutate: vi.fn(), isPending: false }),
     useReorderTorrents: () => ({ mutate: vi.fn() }),
     useSetTorrentPriority: () => ({ mutate: vi.fn() }),
   };
