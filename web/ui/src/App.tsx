@@ -33,6 +33,8 @@ export default function App() {
           </Routes>
           <Toaster
             position="bottom-right"
+            visibleToasts={9}
+            duration={2500}
             toastOptions={{
               style: {
                 background: "var(--color-bg-elevated)",

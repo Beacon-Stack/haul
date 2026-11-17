@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,6 +18,7 @@ import (
 	"github.com/beacon-stack/haul/internal/core/torrent"
 	"github.com/beacon-stack/haul/internal/db"
 	"github.com/beacon-stack/haul/internal/events"
+	"github.com/beacon-stack/haul/internal/logging"
 	"github.com/beacon-stack/haul/internal/pulse"
 	"github.com/beacon-stack/haul/internal/version"
 	"github.com/beacon-stack/haul/web"
@@ -36,25 +36,9 @@ func main() {
 	}
 
 	// ── Logger ────────────────────────────────────────────────────────────
-	var handler slog.Handler
-	opts := &slog.HandlerOptions{}
-	switch cfg.Log.Level {
-	case "debug":
-		opts.Level = slog.LevelDebug
-	case "warn":
-		opts.Level = slog.LevelWarn
-	case "error":
-		opts.Level = slog.LevelError
-	default:
-		opts.Level = slog.LevelInfo
-	}
-
-	if cfg.Log.Format == "text" {
-		handler = slog.NewTextHandler(os.Stdout, opts)
-	} else {
-		handler = slog.NewJSONHandler(os.Stdout, opts)
-	}
-	logger := slog.New(handler)
+	// logging.New tees to stdout (json/text per cfg.Log.Format) and into a
+	// 1000-entry ring buffer the dashboard reads via /api/v1/system/logs.
+	logger, logBuffer := logging.New(cfg.Log.Level, cfg.Log.Format)
 
 	logger.Info(version.AppName+" starting",
 		"version", version.Version,
@@ -192,13 +176,16 @@ func main() {
 	}()
 
 	// ── HTTP router ───────────────────────────────────────────────────────
+	startTime := time.Now()
 	router := api.NewRouter(api.RouterConfig{
 		Logger:     logger,
+		StartTime:  startTime,
 		Session:    session,
 		WSHub:      wsHub,
 		Categories: categorySvc,
 		Tags:       tagSvc,
 		DB:         database.SQL,
+		LogBuffer:  logBuffer,
 	})
 
 	// Mount the embedded web UI as a catch-all.
