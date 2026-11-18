@@ -119,7 +119,11 @@ func (s *Session) renameTorrentFolder(hash string, mt *managedTorrent, meta *Req
 		return
 	}
 
-	oldDir := filepath.Join(mt.savePath, info.BestName())
+	oldDir, ok := torrentContentPath(mt.savePath, info)
+	if !ok {
+		// No folder of its own: renaming oldDir would rename the save dir.
+		return
+	}
 	if _, err := os.Stat(oldDir); os.IsNotExist(err) {
 		return
 	}

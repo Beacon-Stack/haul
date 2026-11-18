@@ -213,13 +213,19 @@ func (s *Session) SetLocation(hash, newPath string) error {
 
 	mi := old.Metainfo()
 	info := old.Info()
+	// Refuse before dropping anything: with no folder of its own, "the
+	// torrent's data" would be the whole save dir, and the rename below
+	// would move everything else in it too.
+	oldContent, ok := torrentContentPath(oldPath, info)
+	if info != nil && !ok {
+		return fmt.Errorf("can't move this torrent: its name doesn't give it a folder of its own")
+	}
 	// Drop first so the storage releases its files before they move.
 	old.Drop()
 
 	dest := newPath // where the data ends up
 	if info != nil {
-		oldContent := filepath.Join(oldPath, info.BestName())
-		newContent := filepath.Join(newPath, info.BestName())
+		newContent, _ := torrentContentPath(newPath, info)
 		if exists(oldContent) {
 			if err := os.Rename(oldContent, newContent); err != nil {
 				// Reopen where the data still is rather than losing it.

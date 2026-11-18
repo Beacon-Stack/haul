@@ -1007,12 +1007,15 @@ func (s *Session) Remove(ctx context.Context, hash string, deleteFiles bool) err
 	mt.t.Drop()
 
 	if deleteFiles {
-		// Best-effort deletion of downloaded content.
-		contentPath := mt.savePath
-		if info := mt.t.Info(); info != nil {
-			contentPath = fmt.Sprintf("%s/%s", mt.savePath, info.BestName())
+		// Best-effort deletion of downloaded content. Only ever delete the
+		// torrent's own file or folder: if its (attacker-controlled) name
+		// doesn't give it one, the path would be the whole save dir.
+		if p, ok := torrentContentPath(mt.savePath, mt.t.Info()); ok {
+			_ = os.RemoveAll(p)
+		} else {
+			s.logger.Warn("not deleting files: torrent has no folder of its own in its save path",
+				"hash", hash, "save_path", mt.savePath)
 		}
-		_ = os.RemoveAll(contentPath)
 	}
 
 	s.bus.Publish(ctx, events.Event{
@@ -1514,10 +1517,7 @@ func (s *Session) torrentInfo(hash string, mt *managedTorrent) (result *Info) {
 		eta = remaining / downloadRate
 	}
 
-	contentPath := mt.savePath
-	if info := t.Info(); info != nil {
-		contentPath = fmt.Sprintf("%s/%s", mt.savePath, info.BestName())
-	}
+	contentPath, _ := torrentContentPath(mt.savePath, t.Info())
 
 	// Count peers from PeerConns() instead of stats.ActivePeers / stats.
 	// ConnectedSeeders so the torrent list row, the detail page facts grid,
@@ -1798,10 +1798,7 @@ func (s *Session) monitorCompletion(mt *managedTorrent, hash string) {
 
 			// Publish completion event BEFORE pausing — the queue poller
 			// needs to see "completed" status to trigger the import pipeline.
-			contentPath := mt.savePath
-			if info := mt.t.Info(); info != nil {
-				contentPath = fmt.Sprintf("%s/%s", mt.savePath, info.BestName())
-			}
+			contentPath, _ := torrentContentPath(mt.savePath, mt.t.Info())
 			s.bus.Publish(context.Background(), events.Event{
 				Type:     events.TypeTorrentCompleted,
 				InfoHash: hash,
