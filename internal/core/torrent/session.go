@@ -552,17 +552,7 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 	source := classifyAddSource(req)
 	s.logger.Info("add torrent", "source", source, "uri_preview", uriPreview(req.URI), "file_bytes", len(req.File))
 
-	// Save-path resolution: explicit request > category default >
-	// configured download dir. The category fallback is what makes
-	// per-category save paths real for callers (Pilot/Prism, the UI)
-	// that send only a category name.
-	savePath := req.SavePath
-	if savePath == "" {
-		savePath = s.categorySavePath(req.Category)
-	}
-	if savePath == "" {
-		savePath = s.cfg.DownloadDir
-	}
+	savePath := s.resolveSavePath(req.SavePath, req.Category)
 
 	if err := os.MkdirAll(savePath, 0o755); err != nil {
 		return nil, fmt.Errorf("creating save path: %w", err)
