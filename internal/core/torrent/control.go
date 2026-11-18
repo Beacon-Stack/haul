@@ -241,10 +241,12 @@ func (s *Session) SetLocation(hash, newPath string) error {
 	return err
 }
 
-// reopen re-adds a dropped torrent with storage rooted at dir and swaps
-// it into mt. It re-adds from the raw info bytes (when known) rather
-// than rebuilding a spec from the torrent's metainfo, which trips v2
-// piece-layer checks for torrents that were added from a .torrent file.
+// reopen re-adds a dropped torrent with storage rooted at dir and
+// installs it as a new managedTorrent. The old managedTorrent is left
+// untouched for the goroutines still holding it (they see the old,
+// dropped torrent and stop); mutating it in place would race with them.
+// It re-adds from the raw info bytes (when known) rather than rebuilding
+// a spec from the torrent's metainfo, which trips v2 piece-layer checks.
 func (s *Session) reopen(mt *managedTorrent, hash string, mi *metainfo.MetaInfo, dir string, paused bool) error {
 	spec := &lt.TorrentSpec{Trackers: mi.UpvertedAnnounceList()}
 	spec.InfoHash = metainfo.NewHashFromHex(hash)
@@ -254,11 +256,28 @@ func (s *Session) reopen(mt *managedTorrent, hash string, mi *metainfo.MetaInfo,
 		return fmt.Errorf("reopening torrent: %w", err)
 	}
 	t.AddTrackers(DefaultPublicTrackers)
+
 	s.mu.Lock()
-	mt.t = t
-	mt.savePath = dir
+	next := &managedTorrent{
+		t:           t,
+		paused:      mt.paused,
+		queuePaused: mt.queuePaused,
+		category:    mt.category,
+		requester:   mt.requester,
+		tags:        append([]string(nil), mt.tags...),
+		addedAt:     mt.addedAt,
+		savePath:    dir,
+		stalledAt:   mt.stalledAt,
+		// Keep stall history so a moved torrent isn't judged as brand
+		// new; byte counters restart with the new handle, so
+		// lastBytesRead starts at zero.
+		firstPeerAt:    mt.firstPeerAt,
+		lastActivityAt: mt.lastActivityAt,
+	}
+	s.torrents[hash] = next
 	s.mu.Unlock()
-	go s.waitAndStart(mt, hash, paused, true)
+
+	go s.waitAndStart(next, hash, paused, true)
 	return nil
 }
 

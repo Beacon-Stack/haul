@@ -1709,7 +1709,13 @@ func classifyStall(p stallParams) StallInfo {
 
 // waitAndStart waits for metadata then begins downloading.
 func (s *Session) waitAndStart(mt *managedTorrent, hash string, paused, verifyOnStart bool) {
-	<-mt.t.GotInfo()
+	select {
+	case <-mt.t.GotInfo():
+	case <-mt.t.Closed():
+		// Dropped before its metadata arrived (removed, or reopened at a
+		// new location by SetLocation, which starts its own waitAndStart).
+		return
+	}
 
 	// Mark as ready — safe to call Stats(), BytesMissing(), etc.
 	// atomic store is safe without holding s.mu; readers don't need
@@ -1820,11 +1826,12 @@ func (s *Session) monitorCompletion(mt *managedTorrent, hash string) {
 			return
 		}
 
-		// Check if torrent was removed.
+		// Stop if the torrent was removed, or replaced by SetLocation
+		// (which reopens it as a new managedTorrent with its own monitor).
 		s.mu.RLock()
-		_, exists := s.torrents[hash]
+		cur, exists := s.torrents[hash]
 		s.mu.RUnlock()
-		if !exists {
+		if !exists || cur != mt {
 			return
 		}
 	}
