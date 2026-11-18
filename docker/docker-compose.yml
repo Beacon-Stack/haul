@@ -1,35 +1,50 @@
 # ============================================================================
-# Haul — standalone deployment
+# Haul — BitTorrent client
+# https://beaconstack.io/haul
 #
-# Runs Haul on its own. State lives in a single SQLite file inside the
-# /config volume — there is no database server to run.
+#   1. Set the two host paths below.
+#   2. docker compose -f docker/docker-compose.yml up -d
+#   3. Open http://<this-host>:8484
 #
-# For the full Beacon Stack (Haul + Pulse + Pilot + Prism + VPN), see
-# https://github.com/beacon-stack/deploy
-#
-# Quick start:
-#   1. Edit the /path/to/... lines below.
-#   2. docker compose up -d
-#   3. Visit http://localhost:8484. Find your API key in Settings → System.
+# To use Haul from Pilot or Prism, add it as a download client there:
+#   URL:     http://<this-host>:8484
+#   API key: Haul → Settings
+# Pilot sends category "tv" and Prism "movies", so downloads land in
+# /data/torrents/tv and /data/torrents/movies. More examples that connect
+# the apps: https://beaconstack.io
 # ============================================================================
 
 services:
-
   haul:
     image: ghcr.io/beacon-stack/haul:latest
     container_name: haul
     restart: unless-stopped
-    environment:
-      # The image defaults to the Beacon Stack layout (Pulse at
-      # http://pulse:9696). Blank it out for standalone use.
-      HAUL_PULSE_URL: ""
-    volumes:
-      - /path/to/config:/config
-      - /path/to/downloads:/downloads
     ports:
-      - "8484:8484"
-      - "6881:6881/tcp"
-      - "6881:6881/udp"
+      - "8484:8484"                 # web UI and API
+      - "6881:6881/tcp"             # BitTorrent peers; forward this port on
+      - "6881:6881/udp"             # your router for better speeds
+    environment:
+      TZ: UTC                       # your timezone, e.g. America/New_York
+
+      # Torrents are saved in /data/torrents/<category>.
+      HAUL_TORRENT_DOWNLOAD_DIR: /data/torrents
+
+      # ── Optional: connect to Pulse ──────────────────────────────────────
+      # Haul registers itself with Pulse, which then hands it to Pilot and
+      # Prism as their download client, so you don't add it by hand. To
+      # turn it on, set the URL and uncomment the two lines below it.
+      HAUL_PULSE_URL: ""                          # e.g. http://192.168.1.10:9696
+      # HAUL_PULSE_API_KEY: <Pulse's API key>     # Pulse → Settings
+      # ADVERTISE_HOST: 192.168.1.10              # this host's address, so
+      #                                           # Pilot/Prism can reach Haul
+    volumes:
+      # Haul's database and settings. Keep it on a local disk.
+      - /path/to/config/haul:/config
+
+      # Your media and downloads, in ONE folder: the same folder you give
+      # Pilot and Prism at /data, so their imports are instant hardlinks.
+      # The folder must be writable by uid 1000.
+      - /path/to/data:/data
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8484/health"]
       interval: 15s
