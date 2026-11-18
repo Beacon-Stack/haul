@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+
+	"github.com/beacon-stack/haul/internal/dbtime"
 )
 
 // HistoryRecord is the lookup-API view of a torrent's persistent
@@ -157,12 +159,14 @@ func (s *Session) LookupHistory(ctx context.Context, f HistoryFilter) ([]History
 		); err != nil {
 			return nil, fmt.Errorf("scan history row: %w", err)
 		}
-		r.AddedAt = addedAt
+		// Normalize so callers always get RFC3339, even for rows written
+		// before dbtime existed (see internal/dbtime).
+		r.AddedAt, _ = dbtime.Normalize(addedAt)
 		if completedAt.Valid {
-			r.CompletedAt = completedAt.String
+			r.CompletedAt, _ = dbtime.Normalize(completedAt.String)
 		}
 		if removedAt.Valid {
-			r.RemovedAt = removedAt.String
+			r.RemovedAt, _ = dbtime.Normalize(removedAt.String)
 		}
 		out = append(out, r)
 	}

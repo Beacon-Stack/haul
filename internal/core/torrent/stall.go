@@ -6,6 +6,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/beacon-stack/haul/internal/dbtime"
 	"github.com/beacon-stack/haul/internal/events"
 )
 
@@ -285,7 +286,7 @@ func (s *Session) CheckStalls(ctx context.Context) {
 			s.mu.Unlock()
 
 			if s.db != nil {
-				if _, err := s.db.Exec(`UPDATE torrents SET stalled_at = ? WHERE info_hash = ?`, stalledAt, hash); err != nil {
+				if _, err := s.db.Exec(`UPDATE torrents SET stalled_at = ? WHERE info_hash = ?`, dbtime.Format(stalledAt), hash); err != nil {
 					s.logger.Warn("stall level 3: persist stalled_at failed", "hash", hash, "error", err)
 				}
 				if _, err := s.db.Exec(`INSERT INTO torrent_tags (info_hash, tag) VALUES (?, 'stalled') ON CONFLICT DO NOTHING`, hash); err != nil {
