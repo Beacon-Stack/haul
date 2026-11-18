@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+
+	"github.com/beacon-stack/haul/internal/dbtime"
 )
 
 // Item is a single row in the activity list. One row per torrent,
@@ -165,12 +167,12 @@ func List(ctx context.Context, db *sql.DB, f ListFilter) ([]Item, int64, error) 
 		); err != nil {
 			return nil, 0, fmt.Errorf("activity scan: %w", err)
 		}
-		it.AddedAt = addedAt
+		it.AddedAt, _ = dbtime.Normalize(addedAt)
 		if completedAt.Valid {
-			it.CompletedAt = completedAt.String
+			it.CompletedAt, _ = dbtime.Normalize(completedAt.String)
 		}
 		if removedAt.Valid {
-			it.RemovedAt = removedAt.String
+			it.RemovedAt, _ = dbtime.Normalize(removedAt.String)
 		}
 		out = append(out, it)
 	}

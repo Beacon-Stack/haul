@@ -41,6 +41,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/beacon-stack/haul/internal/config"
+	"github.com/beacon-stack/haul/internal/dbtime"
 	"github.com/beacon-stack/haul/internal/events"
 	"github.com/beacon-stack/haul/internal/version"
 )
@@ -1007,12 +1008,15 @@ func (s *Session) Remove(ctx context.Context, hash string, deleteFiles bool) err
 	mt.t.Drop()
 
 	if deleteFiles {
-		// Best-effort deletion of downloaded content.
-		contentPath := mt.savePath
-		if info := mt.t.Info(); info != nil {
-			contentPath = fmt.Sprintf("%s/%s", mt.savePath, info.BestName())
+		// Best-effort deletion of downloaded content. Only ever delete the
+		// torrent's own file or folder: if its (attacker-controlled) name
+		// doesn't give it one, the path would be the whole save dir.
+		if p, ok := torrentContentPath(mt.savePath, mt.t.Info()); ok {
+			_ = os.RemoveAll(p)
+		} else {
+			s.logger.Warn("not deleting files: torrent has no folder of its own in its save path",
+				"hash", hash, "save_path", mt.savePath)
 		}
-		_ = os.RemoveAll(contentPath)
 	}
 
 	s.bus.Publish(ctx, events.Event{
@@ -1514,10 +1518,7 @@ func (s *Session) torrentInfo(hash string, mt *managedTorrent) (result *Info) {
 		eta = remaining / downloadRate
 	}
 
-	contentPath := mt.savePath
-	if info := t.Info(); info != nil {
-		contentPath = fmt.Sprintf("%s/%s", mt.savePath, info.BestName())
-	}
+	contentPath, _ := torrentContentPath(mt.savePath, t.Info())
 
 	// Count peers from PeerConns() instead of stats.ActivePeers / stats.
 	// ConnectedSeeders so the torrent list row, the detail page facts grid,
@@ -1798,10 +1799,7 @@ func (s *Session) monitorCompletion(mt *managedTorrent, hash string) {
 
 			// Publish completion event BEFORE pausing — the queue poller
 			// needs to see "completed" status to trigger the import pipeline.
-			contentPath := mt.savePath
-			if info := mt.t.Info(); info != nil {
-				contentPath = fmt.Sprintf("%s/%s", mt.savePath, info.BestName())
-			}
+			contentPath, _ := torrentContentPath(mt.savePath, mt.t.Info())
 			s.bus.Publish(context.Background(), events.Event{
 				Type:     events.TypeTorrentCompleted,
 				InfoHash: hash,
@@ -1861,7 +1859,7 @@ func (s *Session) persistTorrent(hash string, mt *managedTorrent) {
 			added_at = EXCLUDED.added_at,
 			resolution = EXCLUDED.resolution,
 			removed_at = NULL`,
-		hash, mt.t.Name(), mt.savePath, mt.category, mt.addedAt, parseResolution(mt.t.Name()),
+		hash, mt.t.Name(), mt.savePath, mt.category, dbtime.Format(mt.addedAt), parseResolution(mt.t.Name()),
 	)
 	if err != nil {
 		s.logger.Error("failed to persist torrent", "hash", hash, "error", err)
@@ -1932,7 +1930,7 @@ func (s *Session) markCompleted(hash string, completedAt time.Time) {
 	if s.db == nil {
 		return
 	}
-	_, err := s.db.Exec(`UPDATE torrents SET completed_at = ? WHERE info_hash = ?`, completedAt, hash)
+	_, err := s.db.Exec(`UPDATE torrents SET completed_at = ? WHERE info_hash = ?`, dbtime.Format(completedAt), hash)
 	if err != nil {
 		s.logger.Error("failed to mark torrent completed", "hash", hash, "error", err)
 	}
@@ -1957,7 +1955,7 @@ func (s *Session) deleteTorrent(hash string) {
 		return
 	}
 	_, _ = s.db.Exec(`DELETE FROM torrent_tags WHERE info_hash = ?`, hash)
-	_, _ = s.db.Exec(`UPDATE torrents SET removed_at = ? WHERE info_hash = ? AND removed_at IS NULL`, time.Now().UTC().Format(time.RFC3339), hash)
+	_, _ = s.db.Exec(`UPDATE torrents SET removed_at = ? WHERE info_hash = ? AND removed_at IS NULL`, dbtime.Format(time.Now()), hash)
 }
 
 // restoreFromDB loads previously saved torrents from the database.
@@ -1992,28 +1990,32 @@ func (s *Session) restoreFromDB() error {
 	var pending []torrentRow
 	for rows.Next() {
 		var r torrentRow
-		// Time columns are TEXT in the SQLite schema (RFC3339 strings
-		// written by Go); scan into nullable strings and parse rather
-		// than relying on database/sql's *time.Time mapping.
+		// Time columns are TEXT in the SQLite schema; scan into nullable
+		// strings and parse with dbtime, which also reads the
+		// time.Time.String() format older Haul versions wrote.
 		var addedAtStr string
 		var completedAtStr, stalledAtStr, removedAtStr sql.NullString
 		if err := rows.Scan(&r.hash, &r.name, &r.savePath, &r.category, &addedAtStr, &r.torrentData, &completedAtStr, &stalledAtStr, &r.requester, &removedAtStr); err != nil {
 			s.logger.Warn("skipping torrent row", "error", err)
 			continue
 		}
-		r.addedAt, _ = time.Parse(time.RFC3339, addedAtStr)
+		if t, err := dbtime.Parse(addedAtStr); err == nil {
+			r.addedAt = t
+		} else {
+			s.logger.Warn("unreadable added_at; leaving it unset", "hash", r.hash, "value", addedAtStr)
+		}
 		if completedAtStr.Valid {
-			if t, err := time.Parse(time.RFC3339, completedAtStr.String); err == nil {
+			if t, err := dbtime.Parse(completedAtStr.String); err == nil {
 				r.completedAt = &t
 			}
 		}
 		if stalledAtStr.Valid {
-			if t, err := time.Parse(time.RFC3339, stalledAtStr.String); err == nil {
+			if t, err := dbtime.Parse(stalledAtStr.String); err == nil {
 				r.stalledAt = &t
 			}
 		}
 		if removedAtStr.Valid {
-			if t, err := time.Parse(time.RFC3339, removedAtStr.String); err == nil {
+			if t, err := dbtime.Parse(removedAtStr.String); err == nil {
 				r.removedAt = &t
 			}
 		}

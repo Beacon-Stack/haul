@@ -28,5 +28,8 @@ func Migrate(sqlDB *sql.DB) error {
 	if err := goose.Up(sqlDB, "migrations"); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
+	if _, err := NormalizeTorrentTimes(sqlDB); err != nil {
+		return fmt.Errorf("normalizing torrent timestamps: %w", err)
+	}
 	return nil
 }

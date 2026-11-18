@@ -213,4 +213,13 @@ func TestListStalls_ContractShape(t *testing.T) {
 	if got.AddedAt == "" {
 		t.Errorf("added_at is empty; Pilot's stallwatcher needs this for grab-history correlation")
 	}
+	// Pilot decodes added_at into a time.Time (RFC3339). A non-empty but
+	// zero ("0001-01-01T00:00:00Z") value used to slip through here after
+	// a restart; assert it is a real, recent time.
+	added, err := time.Parse(time.RFC3339, got.AddedAt)
+	if err != nil {
+		t.Errorf("added_at = %q is not RFC3339: %v", got.AddedAt, err)
+	} else if age := time.Since(added); age < 0 || age > time.Minute {
+		t.Errorf("added_at = %q is not the recent add time (age %s)", got.AddedAt, age)
+	}
 }
