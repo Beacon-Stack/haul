@@ -26,7 +26,9 @@ services:
     environment:
       TZ: UTC                       # your timezone, e.g. America/New_York
 
-      # Torrents are saved in /data/torrents/<category>.
+      # Torrents are saved in <this folder>/<category>. Change it here or
+      # in Settings → Downloads (the setting there wins). A category can
+      # also have its own folder, e.g. a NAS share.
       HAUL_TORRENT_DOWNLOAD_DIR: /data/torrents
 
       # ── Optional: connect to Pulse ──────────────────────────────────────

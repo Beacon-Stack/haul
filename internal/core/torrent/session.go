@@ -195,6 +195,15 @@ type Session struct {
 	runtimeMu          sync.RWMutex
 	pauseOnComplete    bool
 	maxActiveDownloads int
+	// downloadDir overrides cfg.DownloadDir when set from the settings
+	// page. See DownloadDir.
+	downloadDir string
+
+	// pieceCompletion is shared by every per-torrent storage (see
+	// storage.go); storages caches one storage per save folder.
+	pieceCompletion storage.PieceCompletion
+	storageMu       sync.Mutex
+	storages        map[string]storage.ClientImpl
 
 	mu             sync.RWMutex
 	torrents       map[string]*managedTorrent
@@ -498,6 +507,7 @@ func NewSession(cfg config.TorrentConfig, db *sql.DB, bus *events.Bus, logger *s
 		cfg:                cfg,
 		torrents:           make(map[string]*managedTorrent),
 		startedAt:          time.Now(),
+		pieceCompletion:    pieceCompletion,
 		pauseOnComplete:    cfg.PauseOnComplete,
 		maxActiveDownloads: cfg.MaxActiveDownloads,
 		downloadLimiter:    downloadLimiter,
@@ -525,6 +535,16 @@ func NewSession(cfg config.TorrentConfig, db *sql.DB, bus *events.Bus, logger *s
 			if n, err := strconv.Atoi(maxStr); err == nil {
 				s.maxActiveDownloads = n
 				logger.Info("max_active_downloads loaded from settings table", "value", n)
+			}
+		}
+		// The download folder set on the settings page wins over the
+		// configured one (env/YAML), like the other UI settings.
+		var dirStr string
+		if err := db.QueryRow(`SELECT value FROM settings WHERE key = 'download_dir'`).Scan(&dirStr); err == nil && dirStr != "" {
+			if err := s.SetDownloadDir(dirStr); err != nil {
+				logger.Warn("ignoring download_dir from settings table", "value", dirStr, "error", err)
+			} else {
+				logger.Info("download_dir loaded from settings table", "value", s.DownloadDir())
 			}
 		}
 	}
@@ -567,10 +587,10 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 			s.logger.Warn("add torrent rejected", "source", source, "reason", "parse failed", "error", parseErr)
 			return nil, fmt.Errorf("parsing torrent file: %w", parseErr)
 		}
-		t, err = s.client.AddTorrent(mi)
+		t, err = s.addMetaInfo(mi, savePath)
 	} else if req.URI != "" {
 		if strings.HasPrefix(req.URI, "magnet:") {
-			t, err = s.client.AddMagnet(req.URI)
+			t, err = s.addMagnet(req.URI, savePath)
 			if err == nil && t != nil {
 				// Bare magnets from public indexers often have no tracker URLs.
 				// Without trackers, metadata resolution relies entirely on DHT,
@@ -591,10 +611,10 @@ func (s *Session) Add(ctx context.Context, req AddRequest) (result *Info, result
 				s.logger.Warn("add torrent rejected", "source", source, "reason", "parse failed", "error", parseErr)
 				return nil, fmt.Errorf("parsing torrent from base64 data: %w", parseErr)
 			}
-			t, err = s.client.AddTorrent(mi)
+			t, err = s.addMetaInfo(mi, savePath)
 		} else if strings.HasPrefix(req.URI, "http://") || strings.HasPrefix(req.URI, "https://") {
 			// HTTP/HTTPS URL — download the .torrent file first.
-			t, err = s.addFromURL(ctx, req.URI)
+			t, err = s.addFromURL(ctx, req.URI, savePath)
 		} else {
 			s.logger.Warn("add torrent rejected", "source", source, "reason", "unsupported uri scheme")
 			return nil, fmt.Errorf("unsupported URI scheme: %s", req.URI)
@@ -1318,8 +1338,9 @@ func (s *Session) enforceMaxActiveDownloads(ctx context.Context) {
 	}
 }
 
-// addFromURL downloads a .torrent file from an HTTP/HTTPS URL and adds it.
-func (s *Session) addFromURL(ctx context.Context, torrentURL string) (*lt.Torrent, error) {
+// addFromURL downloads a .torrent file from an HTTP/HTTPS URL and adds it,
+// storing its data in dir.
+func (s *Session) addFromURL(ctx context.Context, torrentURL, dir string) (*lt.Torrent, error) {
 	// Use a client that doesn't follow redirects — we need to intercept
 	// magnet: URI redirects from torznab proxies.
 	noRedirectClient := &http.Client{
@@ -1346,10 +1367,10 @@ func (s *Session) addFromURL(ctx context.Context, torrentURL string) (*lt.Torren
 		location := resp.Header.Get("Location")
 		if strings.HasPrefix(location, "magnet:") {
 			s.logger.Info("torrent URL redirected to magnet", "url", torrentURL)
-			return s.client.AddMagnet(location)
+			return s.addMagnet(location, dir)
 		}
 		// Follow non-magnet redirects manually.
-		return s.addFromURL(ctx, location)
+		return s.addFromURL(ctx, location, dir)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -1364,7 +1385,7 @@ func (s *Session) addFromURL(ctx context.Context, torrentURL string) (*lt.Torren
 	// Check if the response body is actually a magnet link (some sites return
 	// magnet URIs as the response body instead of redirecting).
 	if len(data) < 2048 && strings.HasPrefix(strings.TrimSpace(string(data)), "magnet:") {
-		return s.client.AddMagnet(strings.TrimSpace(string(data)))
+		return s.addMagnet(strings.TrimSpace(string(data)), dir)
 	}
 
 	mi, err := metainfo.Load(bytes.NewReader(data))
@@ -1372,7 +1393,7 @@ func (s *Session) addFromURL(ctx context.Context, torrentURL string) (*lt.Torren
 		return nil, fmt.Errorf("parsing torrent from %s: %w", torrentURL, err)
 	}
 
-	return s.client.AddTorrent(mi)
+	return s.addMetaInfo(mi, dir)
 }
 
 // torrentInfo builds an Info struct from internal state.
@@ -2030,7 +2051,16 @@ func (s *Session) restoreFromDB() error {
 			continue
 		}
 
-		t, addErr := s.client.AddTorrent(mi)
+		dir := s.restoreDir(r.savePath, mi)
+		if dir != r.savePath && r.savePath != "" {
+			s.logger.Info("restored torrent's data is in the download dir, not its save path; using the download dir",
+				"hash", r.hash, "name", r.name, "save_path", r.savePath, "data_dir", dir)
+			r.savePath = dir
+			if s.db != nil {
+				_, _ = s.db.Exec(`UPDATE torrents SET save_path = ? WHERE info_hash = ?`, dir, r.hash)
+			}
+		}
+		t, addErr := s.addMetaInfo(mi, dir)
 		if addErr != nil {
 			s.logger.Warn("failed to re-add torrent, removing", "hash", r.hash, "error", addErr)
 			s.deleteTorrent(r.hash)

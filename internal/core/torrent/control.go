@@ -9,6 +9,7 @@ import (
 	"time"
 
 	lt "github.com/anacrolix/torrent"
+	"github.com/anacrolix/torrent/metainfo"
 
 	"github.com/beacon-stack/haul/internal/config"
 	"github.com/beacon-stack/haul/internal/events"
@@ -58,9 +59,9 @@ func (s *Session) resolveSavePath(explicit, category string) string {
 		return p
 	}
 	if dir := categoryFolder(category); dir != "" {
-		return filepath.Join(s.cfg.DownloadDir, dir)
+		return filepath.Join(s.DownloadDir(), dir)
 	}
-	return s.cfg.DownloadDir
+	return s.DownloadDir()
 }
 
 // categoryFolder returns category as a folder name, or "" when it is
@@ -182,8 +183,16 @@ func (s *Session) SetPriority(hash string, priority int) error {
 	return nil
 }
 
-// SetLocation moves a torrent's data to a new save path.
+// SetLocation moves a torrent's data to a new save path and reopens the
+// torrent there, so it keeps downloading and seeding from the new folder.
+// (Moving the files alone left the torrent writing to the old folder.)
+// The move is a rename, so newPath must be on the same filesystem.
 func (s *Session) SetLocation(hash, newPath string) error {
+	if newPath == "" || !filepath.IsAbs(newPath) {
+		return fmt.Errorf("location must be an absolute path")
+	}
+	newPath = filepath.Clean(newPath)
+
 	s.mu.Lock()
 	mt, ok := s.torrents[hash]
 	if !ok {
@@ -191,26 +200,66 @@ func (s *Session) SetLocation(hash, newPath string) error {
 		return fmt.Errorf("torrent not found: %s", hash)
 	}
 	oldPath := mt.savePath
-	mt.savePath = newPath
+	old := mt.t
+	paused := mt.paused
 	s.mu.Unlock()
 
+	if filepath.Clean(oldPath) == newPath {
+		return nil
+	}
 	if err := os.MkdirAll(newPath, 0o755); err != nil {
 		return fmt.Errorf("creating new path: %w", err)
 	}
 
-	// Move files if the torrent has metadata.
-	if info := mt.t.Info(); info != nil {
+	mi := old.Metainfo()
+	info := old.Info()
+	// Drop first so the storage releases its files before they move.
+	old.Drop()
+
+	dest := newPath // where the data ends up
+	if info != nil {
 		oldContent := filepath.Join(oldPath, info.BestName())
 		newContent := filepath.Join(newPath, info.BestName())
-		if _, err := os.Stat(oldContent); err == nil {
+		if exists(oldContent) {
 			if err := os.Rename(oldContent, newContent); err != nil {
-				s.logger.Warn("failed to move torrent data", "hash", hash, "error", err)
+				// Reopen where the data still is rather than losing it.
+				s.logger.Warn("failed to move torrent data; keeping it in place", "hash", hash, "error", err)
+				if reErr := s.reopen(mt, hash, &mi, oldPath, paused); reErr != nil {
+					return fmt.Errorf("moving data: %w (and reopening failed: %v)", err, reErr)
+				}
+				return fmt.Errorf("moving data (must be on the same filesystem): %w", err)
 			}
 		}
 	}
-
-	_, err := s.db.Exec(`UPDATE torrents SET save_path = ? WHERE info_hash = ?`, newPath, hash)
+	if err := s.reopen(mt, hash, &mi, dest, paused); err != nil {
+		return err
+	}
+	if s.db == nil {
+		return nil
+	}
+	_, err := s.db.Exec(`UPDATE torrents SET save_path = ? WHERE info_hash = ?`, dest, hash)
 	return err
+}
+
+// reopen re-adds a dropped torrent with storage rooted at dir and swaps
+// it into mt. It re-adds from the raw info bytes (when known) rather
+// than rebuilding a spec from the torrent's metainfo, which trips v2
+// piece-layer checks for torrents that were added from a .torrent file.
+func (s *Session) reopen(mt *managedTorrent, hash string, mi *metainfo.MetaInfo, dir string, paused bool) error {
+	spec := &lt.TorrentSpec{Trackers: mi.UpvertedAnnounceList()}
+	spec.InfoHash = metainfo.NewHashFromHex(hash)
+	spec.InfoBytes = mi.InfoBytes
+	t, err := s.addSpec(spec, dir)
+	if err != nil {
+		return fmt.Errorf("reopening torrent: %w", err)
+	}
+	t.AddTrackers(DefaultPublicTrackers)
+	s.mu.Lock()
+	mt.t = t
+	mt.savePath = dir
+	s.mu.Unlock()
+	go s.waitAndStart(mt, hash, paused, true)
+	return nil
 }
 
 // GetFiles returns the file list for a torrent.

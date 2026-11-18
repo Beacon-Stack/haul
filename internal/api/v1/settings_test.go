@@ -200,3 +200,40 @@ func buildMinimalSession(t *testing.T) *torrent.Session {
 	t.Cleanup(session.Close)
 	return session
 }
+
+// download_dir from the settings page used to be a phantom write: saved,
+// shown, never used. It must change where new torrents go, and the page
+// must show the live value when nothing has been saved yet.
+func TestApplyRuntimeSettings_DownloadDir(t *testing.T) {
+	initial := t.TempDir()
+	cfg := config.TorrentConfig{DownloadDir: initial}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	session, err := torrent.NewSession(cfg, nil, events.New(slog.Default()), logger)
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	t.Cleanup(session.Close)
+
+	settings := map[string]string{}
+	withEffectiveDefaults(settings, session)
+	if settings["download_dir"] != initial {
+		t.Fatalf("effective download_dir = %q, want the configured %q", settings["download_dir"], initial)
+	}
+
+	nas := t.TempDir() + "/nas/torrents"
+	applied := applyRuntimeSettings(session, map[string]string{"download_dir": nas})
+	if len(applied) != 1 || session.DownloadDir() != nas {
+		t.Fatalf("download_dir not applied: applied=%v live=%q", applied, session.DownloadDir())
+	}
+	if _, err := os.Stat(nas); err != nil {
+		t.Fatalf("download dir was not created: %v", err)
+	}
+
+	// A relative path is refused and leaves the live value alone.
+	if applied := applyRuntimeSettings(session, map[string]string{"download_dir": "relative/path"}); len(applied) != 0 {
+		t.Fatalf("relative download_dir applied: %v", applied)
+	}
+	if session.DownloadDir() != nas {
+		t.Fatalf("live download_dir changed to %q after a rejected value", session.DownloadDir())
+	}
+}
