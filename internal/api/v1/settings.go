@@ -25,6 +25,7 @@ import (
 	"context"
 	"database/sql"
 	"net/http"
+	"os"
 	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -77,6 +78,11 @@ func applyRuntimeSettings(session *torrent.Session, updates map[string]string) [
 				session.SetGlobalDownloadLimit(n)
 				applied = append(applied, k)
 			}
+		case "download_dir":
+			// Validated by the handler before anything is persisted.
+			if err := session.SetDownloadDir(v); err == nil {
+				applied = append(applied, k)
+			}
 		case "upload_rate_limit", "global_upload_limit":
 			if n, err := strconv.Atoi(v); err == nil {
 				session.SetGlobalUploadLimit(n)
@@ -118,6 +124,7 @@ func RegisterSettingsRoutes(api huma.API, db *sql.DB, session *torrent.Session) 
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		withEffectiveDefaults(settings, session)
 		return &settingsOutput{Body: &settingsBody{Settings: settings}}, nil
 	})
 
@@ -128,6 +135,14 @@ func RegisterSettingsRoutes(api huma.API, db *sql.DB, session *torrent.Session) 
 		Summary:     "Update runtime settings",
 		Tags:        []string{"Settings"},
 	}, func(_ context.Context, input *setSettingsInput) (*settingsOutput, error) {
+		if dir, ok := input.Body.Settings["download_dir"]; ok {
+			if err := torrent.ValidateDownloadDir(dir); err != nil {
+				return nil, huma.Error400BadRequest(err.Error())
+			}
+			if err := os.MkdirAll(dir, 0o755); err != nil {
+				return nil, huma.Error400BadRequest("Haul can't create that folder: " + err.Error())
+			}
+		}
 		for k, v := range input.Body.Settings {
 			_, err := db.Exec(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, k, v)
 			if err != nil {
@@ -144,6 +159,19 @@ func RegisterSettingsRoutes(api huma.API, db *sql.DB, session *torrent.Session) 
 		if err != nil {
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
+		withEffectiveDefaults(settings, session)
 		return &settingsOutput{Body: &settingsBody{Settings: settings}}, nil
 	})
+}
+
+// withEffectiveDefaults fills in settings that have a live value but no
+// row yet, so the settings page shows what Haul is actually using (the
+// download folder from env/YAML) instead of a placeholder.
+func withEffectiveDefaults(settings map[string]string, session *torrent.Session) {
+	if session == nil {
+		return
+	}
+	if settings["download_dir"] == "" {
+		settings["download_dir"] = session.DownloadDir()
+	}
 }

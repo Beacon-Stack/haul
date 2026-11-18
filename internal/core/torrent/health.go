@@ -127,7 +127,7 @@ func (s *Session) GetHealth() *HealthReport {
 	}
 
 	// Disk space for download directory.
-	diskFree, diskTotal := getDiskSpace(s.cfg.DownloadDir)
+	diskFree, diskTotal := getDiskSpace(s.DownloadDir())
 
 	vpnActive, vpnIface, externalIP := GetVPNStatus()
 
