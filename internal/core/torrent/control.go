@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	lt "github.com/anacrolix/torrent"
@@ -34,6 +35,42 @@ func (s *Session) categorySavePath(category string) string {
 		return ""
 	}
 	return p
+}
+
+// resolveSavePath picks where a new torrent is saved:
+//
+//  1. an explicit save path from the request,
+//  2. the category's configured save path,
+//  3. <download dir>/<category> for any other category, and
+//  4. the download dir when there is no category.
+//
+// Step 3 is what lets a fresh install work with no setup: Pilot sends
+// category "tv" and Prism "movies", so downloads land in
+// /data/torrents/tv and /data/torrents/movies, the layout Sonarr and
+// Radarr users know (qBittorrent's automatic torrent management does
+// the same). Category names that aren't a single safe folder name fall
+// back to the download dir rather than escaping it.
+func (s *Session) resolveSavePath(explicit, category string) string {
+	if explicit != "" {
+		return explicit
+	}
+	if p := s.categorySavePath(category); p != "" {
+		return p
+	}
+	if dir := categoryFolder(category); dir != "" {
+		return filepath.Join(s.cfg.DownloadDir, dir)
+	}
+	return s.cfg.DownloadDir
+}
+
+// categoryFolder returns category as a folder name, or "" when it is
+// empty or not a single plain path element.
+func categoryFolder(category string) string {
+	c := strings.TrimSpace(category)
+	if c == "" || c == "." || c == ".." || strings.ContainsAny(c, `/\`+"\x00") {
+		return ""
+	}
+	return c
 }
 
 // SetCategory assigns a category to a torrent.
