@@ -2,8 +2,11 @@
 # https://goreleaser.com
 #
 # Triggered from .github/workflows/release.yml on `v*` tag pushes.
-# Builds cross-platform binaries, archives them, publishes a GitHub
-# Release, and pushes multi-tag docker images to ghcr.io.
+# Builds cross-platform binaries, archives them and publishes a GitHub
+# Release. Images are built by the docker job in release.yml, from the
+# same Dockerfile CI uses: GoReleaser's own image step builds from a
+# folder holding only the binary, which the from-source Dockerfile
+# can't use (why the v0.2.0 and v0.3.0 Pulse releases failed).
 
 version: 2
 
@@ -23,18 +26,12 @@ builds:
     goos:
       - linux
       - darwin
-      - windows
     goarch:
       - amd64
       - arm64
-    ignore:
-      - goos: windows
-        goarch: arm64
     ldflags:
       - -s -w
       - -X github.com/beacon-stack/haul/internal/version.Version={{.Version}}
-      - -X github.com/beacon-stack/haul/internal/version.BuildTime={{.Date}}
-      - -X github.com/beacon-stack/haul/internal/version.Commit={{.FullCommit}}
 
 archives:
   - id: haul
@@ -66,27 +63,6 @@ changelog:
       - '^test:'
       - '^ci:'
       - '(?i)merge pull request'
-
-# Release images are amd64-only; `:latest` is owned by the CI main-branch
-# job (which pushes multi-arch) so a release never downgrades arm64 users.
-dockers:
-  - image_templates:
-      - 'ghcr.io/beacon-stack/haul:{{ .Version }}'
-      - 'ghcr.io/beacon-stack/haul:v{{ .Major }}.{{ .Minor }}'
-      - 'ghcr.io/beacon-stack/haul:v{{ .Major }}'
-    dockerfile: docker/Dockerfile.goreleaser
-    use: buildx
-    goos: linux
-    goarch: amd64
-    build_flag_templates:
-      - '--pull'
-      - '--platform=linux/amd64'
-      - '--label=org.opencontainers.image.title=haul'
-      - '--label=org.opencontainers.image.description=Self-hosted BitTorrent client for the Beacon media stack'
-      - '--label=org.opencontainers.image.source=https://github.com/beacon-stack/haul'
-      - '--label=org.opencontainers.image.version={{ .Version }}'
-      - '--label=org.opencontainers.image.revision={{ .FullCommit }}'
-      - '--label=org.opencontainers.image.licenses=MIT'
 
 release:
   github:

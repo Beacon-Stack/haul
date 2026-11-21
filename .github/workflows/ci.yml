@@ -114,7 +114,8 @@ jobs:
   docker:
     name: Docker
     runs-on: ubuntu-latest
-    # Only build and push images on pushes to main (not PRs).
+    # Pushes to main publish :develop (every merge). :latest is the newest
+    # release, published by release.yml when a v* tag is pushed.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [test, build, frontend]
     permissions:
@@ -145,7 +146,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=develop,enable={{is_default_branch}}
 
       - name: Build and push
         uses: docker/build-push-action@v5
