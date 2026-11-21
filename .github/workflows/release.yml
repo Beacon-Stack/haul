@@ -1,5 +1,13 @@
 name: Release
 
+# Push a v* tag (e.g. v0.13.0) to publish a release:
+#   1. GoReleaser builds binaries and publishes the GitHub Release, with
+#      notes from the commits since the previous tag.
+#   2. The docker job builds the images from the same Dockerfile CI uses,
+#      for amd64 and arm64, and tags them <version>, <major>.<minor> and
+#      latest. :latest is always the newest release; every merge to main
+#      is published as :develop by ci.yml.
+
 on:
   push:
     tags:
@@ -11,12 +19,13 @@ permissions:
 
 jobs:
   goreleaser:
+    name: GitHub release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # full history for changelog generation
+          fetch-depth: 0  # full history for the changelog
 
       - name: Set up Go
         uses: actions/setup-go@v5
@@ -31,6 +40,25 @@ jobs:
           cache: npm
           cache-dependency-path: web/ui/package-lock.json
 
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Docker
+    # After the GitHub release exists, so a failed release publishes no
+    # images and :latest never moves without release notes behind it.
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -42,15 +70,30 @@ jobs:
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
-          # Auto-provided GITHUB_TOKEN; `packages: write` above grants the
-          # push scope. See the comment in ci.yml for context.
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
         with:
-          distribution: goreleaser
-          version: '~> v2'
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          images: ghcr.io/beacon-stack/haul
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            BUILD_TIME=${{ github.event.head_commit.timestamp }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+          provenance: false
