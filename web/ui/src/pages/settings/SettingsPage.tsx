@@ -1,4 +1,5 @@
 import { useState } from "react";
+import UpdateCheck from "@beacon-shared/UpdateCheck";
 import { useStats } from "@/api/stats";
 import { useHealth } from "@/api/health";
 import {
@@ -442,6 +443,10 @@ export default function SettingsPage() {
                 )}
               </div>
             ))}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "6px 0" }}>
+              <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>Updates</span>
+              <UpdateCheck app="Haul" service="haul" image="ghcr.io/beacon-stack/haul" />
+            </div>
           </div>
 
           <p style={{ margin: 0, fontSize: 12, color: "var(--color-text-muted)" }}>
