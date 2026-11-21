@@ -135,6 +135,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	v1.RegisterCategoryRoutes(humaAPI, cfg.Categories)
 	v1.RegisterTagRoutes(humaAPI, cfg.Tags)
 	v1.RegisterStatsRoutes(humaAPI, cfg.Session)
+	v1.RegisterUpdateRoutes(humaAPI)
 	v1.RegisterSettingsRoutes(humaAPI, cfg.DB, cfg.Session)
 	v1.RegisterHealthRoutes(humaAPI, cfg.Session)
 
