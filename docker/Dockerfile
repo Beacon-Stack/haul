@@ -1,5 +1,7 @@
 # ── Frontend build stage ──────────────────────────────────────────────────────
-FROM node:22-alpine AS frontend
+# The UI is plain JS/CSS, the same for every platform, so build it once
+# on the runner's own platform instead of again under arm64 emulation.
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
 
 WORKDIR /app
 
@@ -15,7 +17,11 @@ RUN cd web/ui && npm run build
 # Output lands in /app/web/static/
 
 # ── Go build stage ───────────────────────────────────────────────────────────
-FROM golang:1.25-alpine AS builder
+# Go cross-compiles: build natively and target the image's platform with
+# GOOS/GOARCH. Emulating arm64 made this step ~10x slower (466 s vs 48 s).
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
+ARG TARGETOS
+ARG TARGETARCH
 
 ARG VERSION=dev
 ARG BUILD_TIME=unknown
@@ -34,7 +40,7 @@ COPY --from=frontend /app/web/static/ ./web/static/
 
 # anacrolix/torrent compiles cleanly with CGO_ENABLED=0 for a fully static
 # binary. No cgo dependencies in haul's tree.
-RUN CGO_ENABLED=0 GOOS=linux go build \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
       -ldflags "-X github.com/beacon-stack/haul/internal/version.Version=${VERSION} \
                 -X github.com/beacon-stack/haul/internal/version.BuildTime=${BUILD_TIME} \
                 -s -w" \
