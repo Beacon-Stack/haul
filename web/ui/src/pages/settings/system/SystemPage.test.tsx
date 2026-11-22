@@ -39,8 +39,10 @@ describe("Haul System page", () => {
     expect(screen.getByText("2h 1m")).toBeInTheDocument();
     expect(screen.getByText("/config/haul.db")).toBeInTheDocument();
     expect(screen.getByText("Check for updates")).toBeInTheDocument();
-    expect(await screen.findByText("Protected")).toBeInTheDocument();
-    expect(screen.getByText(/1\.00 TB used of 2\.00 TB/)).toBeInTheDocument();
+    expect(await screen.findByText("Protected (1.2.3.4)")).toBeInTheDocument();
+    expect(screen.getByText("All systems healthy")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Check now" })).toBeInTheDocument();
+    expect(screen.getByText("1.00 TB used of 2.00 TB (1.00 TB free)")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Diagnostics/ })).toHaveAttribute("href", "/system/diagnostics");
     expect(screen.getByRole("link", { name: /Cleanup history/ })).toHaveAttribute("href", "/system/cleanup-history");
   });
