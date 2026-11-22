@@ -32,6 +32,7 @@ builds:
     ldflags:
       - -s -w
       - -X github.com/beacon-stack/haul/internal/version.Version={{.Version}}
+      - -X github.com/beacon-stack/haul/internal/version.BuildTime={{.Date}}
 
 archives:
   - id: haul

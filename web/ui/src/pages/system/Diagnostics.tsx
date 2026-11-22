@@ -63,7 +63,7 @@ function Wrapper({ children }: { children: React.ReactNode }) {
         </h1>
         <div style={{ display: "flex", gap: 14 }}>
           <Link
-            to="/system/logs"
+            to="/settings/system/logs"
             style={{ color: "var(--color-text-secondary)", fontSize: 13, display: "inline-flex", alignItems: "center", gap: 4 }}
           >
             <FileText size={14} /> Logs

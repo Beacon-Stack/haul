@@ -1,10 +1,7 @@
 import { useState } from "react";
-import UpdateCheck from "@beacon-shared/UpdateCheck";
-import { useStats } from "@/api/stats";
-import { useHealth } from "@/api/health";
 import {
-  Activity, Wifi, Download, Upload,
-  Zap, Shield, Clock, Terminal, Anchor, Monitor, Moon, Sun, Check,
+  Wifi, Download, Upload,
+  Zap, Shield, Clock, Terminal, Monitor, Moon, Sun, Check,
 } from "lucide-react";
 import { useSettingsForm, SaveButton, ToggleRow, FieldRow } from "@/components/settings/SettingsForm";
 import {
@@ -200,22 +197,12 @@ function SectionCard({ title, icon: Icon, children, advanced }: {
 }
 
 // Disk-scale formatter: the dashboard cares about GB/TB, not KB.
-function formatDiskBytes(b: number): string {
-  if (b <= 0) return "0 B";
-  if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  return `${(b / (1024 * 1024 * 1024 * 1024)).toFixed(2)} TB`;
-}
 
 // ── Settings Page ─────────────────────────────────────────────────────────
 
 export default function SettingsPage() {
-  const { data: stats } = useStats();
-  const { data: health } = useHealth();
   const { dirty, saving, set, getBool, getNum, getStr, handleSave } = useSettingsForm();
 
-  const diskPercent = health && health.disk_total_bytes > 0
-    ? ((health.disk_total_bytes - health.disk_free_bytes) / health.disk_total_bytes * 100)
-    : 0;
 
   return (
     <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
@@ -384,76 +371,12 @@ export default function SettingsPage() {
           </p>
         </SectionCard>
 
-        {/* ── Engine Health ───────────────────────────────────────────────── */}
-        {health && (
-          <SectionCard title="Engine Health" icon={Activity}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: 12 }}>
-              {[
-                { label: "Status", value: health.engine_status, color: health.engine_status === "healthy" ? "var(--color-success)" : "var(--color-danger)" },
-                { label: "VPN", value: health.vpn_active ? "Protected" : "Not Active", color: health.vpn_active ? "var(--color-success)" : "var(--color-danger)" },
-                { label: "External IP", value: health.external_ip || "Unknown" },
-                { label: "Peers", value: String(health.peers_connected) },
-                { label: "Stalled", value: String(health.stalled_count), color: health.stalled_count > 0 ? "var(--color-warning)" : undefined },
-              ].map(({ label, value, color }) => (
-                <div key={label} style={{ background: "var(--color-bg-elevated)", borderRadius: 6, padding: "10px 14px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", marginBottom: 2 }}>{label}</div>
-                  <div style={{ fontSize: 14, fontWeight: 500, color: color || "var(--color-text-primary)", textTransform: "capitalize" }}>{value}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Disk usage bar */}
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-                <span style={{ fontSize: 12, color: "var(--color-text-muted)" }}>
-                  {formatDiskBytes(health.disk_total_bytes - health.disk_free_bytes)} used of {formatDiskBytes(health.disk_total_bytes)}
-                </span>
-                <span style={{ fontSize: 12, color: "var(--color-text-secondary)", fontWeight: 500 }}>{diskPercent.toFixed(1)}%</span>
-              </div>
-              <div style={{ height: 6, borderRadius: 3, background: "var(--color-bg-subtle)" }}>
-                <div style={{
-                  width: `${Math.min(diskPercent, 100)}%`,
-                  height: "100%",
-                  borderRadius: 3,
-                  background: diskPercent > 90 ? "var(--color-danger)" : diskPercent > 75 ? "var(--color-warning)" : "var(--color-accent)",
-                }} />
-              </div>
-              <div style={{ fontSize: 11, color: "var(--color-text-muted)", marginTop: 4 }}>{formatDiskBytes(health.disk_free_bytes)} free</div>
-            </div>
-          </SectionCard>
-        )}
         </div>
 
-        {/* Row 5: About (full width) */}
-        {/* ── About ──────────────────────────────────────────────────────── */}
-        <SectionCard title="About" icon={Anchor}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {[
-              { label: "Version", value: stats?.version ?? "-", mono: true },
-              { label: "Total Torrents", value: String(stats?.total_torrents ?? 0) },
-              { label: "API Docs", value: "/api/docs", link: true },
-              { label: "OpenAPI Spec", value: "/api/openapi", link: true },
-            ].map(({ label, value, mono, link }) => (
-              <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid var(--color-border-subtle)" }}>
-                <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>{label}</span>
-                {link ? (
-                  <a href={value} target="_blank" rel="noopener" style={{ fontSize: 13, color: "var(--color-accent)", textDecoration: "none" }}>{value}</a>
-                ) : (
-                  <span style={{ fontSize: 13, color: "var(--color-text-primary)", fontFamily: mono ? "var(--font-family-mono)" : undefined }}>{value}</span>
-                )}
-              </div>
-            ))}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "6px 0" }}>
-              <span style={{ fontSize: 13, color: "var(--color-text-secondary)" }}>Updates</span>
-              <UpdateCheck app="Haul" service="haul" image="ghcr.io/beacon-stack/haul" />
-            </div>
-          </div>
-
-          <p style={{ margin: 0, fontSize: 12, color: "var(--color-text-muted)" }}>
+        <p style={{ margin: 0, fontSize: 12, color: "var(--color-text-muted)" }}>
             Startup settings are configured via config.yaml or HAUL_* environment variables.
             Runtime settings changed here are persisted in the database and take effect immediately.
           </p>
-        </SectionCard>
 
       </div>
     </div>

@@ -47,6 +47,7 @@ func (a *sessionAdminAdapter) LiveHashes() map[string]struct{} {
 func main() {
 	cfgFile := flag.String("config", "", "path to config file")
 	flag.Parse()
+	startTime := time.Now()
 
 	// ── Config ────────────────────────────────────────────────────────────
 	cfg, err := config.Load(*cfgFile)
@@ -280,6 +281,8 @@ func main() {
 
 	// ── HTTP router ───────────────────────────────────────────────────────
 	router := api.NewRouter(api.RouterConfig{
+		StartTime:  startTime,
+		DBPath:     cfg.Database.Path,
 		Logger:     logger,
 		Session:    session,
 		WSHub:      wsHub,
