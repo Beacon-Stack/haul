@@ -9,6 +9,7 @@ import {
   Stethoscope,
 } from "lucide-react";
 import Shell, { type NavItem } from "@beacon-shared/Shell";
+import UpdatedNotice from "@beacon-shared/UpdatedNotice";
 import { useWebSocket } from "@/api/websocket";
 import { applyTheme } from "@/theme";
 
@@ -45,6 +46,7 @@ export default function HaulShell() {
       appIcon={<AppIcon />}
       mainNav={nav}
       collapsedStorageKey="haul-sidebar-collapsed"
+      overlay={<UpdatedNotice app="Haul" versionPath="/stats" />}
     />
   );
 }
