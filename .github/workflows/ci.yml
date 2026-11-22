@@ -118,6 +118,14 @@ jobs:
     # :latest is the newest release, published by release.yml on v* tags.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [test, build, frontend]
+    # A normal run takes 4-6 minutes. A stuck one fails here instead of
+    # holding a runner for GitHub's 6-hour default.
+    timeout-minutes: 30
+    # Newest push wins: an older build still running is cancelled, so it
+    # can never finish late and push an older image over :main.
+    concurrency:
+      group: docker-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write  # required to push to ghcr.io
