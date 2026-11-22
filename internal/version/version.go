@@ -7,3 +7,6 @@ const AppName = "haul"
 
 // Version is set at build time via -ldflags.
 var Version = "dev"
+
+// BuildTime is the UTC build timestamp, set at build time via -ldflags.
+var BuildTime = "unknown"

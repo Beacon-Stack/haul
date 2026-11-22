@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Navigate, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "sonner";
 import { ConfirmProvider } from "@beacon-shared/ConfirmDialog";
@@ -13,7 +13,8 @@ import SettingsPage from "@/pages/settings/SettingsPage";
 import MediaManagementPage from "@/pages/media-management/MediaManagementPage";
 import DiagnosticsPage from "@/pages/system/Diagnostics";
 import CleanupHistoryPage from "@/pages/system/CleanupHistory";
-import LogsPage from "@/pages/system/Logs";
+import SystemPage from "@/pages/settings/system/SystemPage";
+import LogsPage from "@/pages/settings/system/Logs";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 5000 } },
@@ -36,7 +37,9 @@ export default function App() {
               <Route path="settings" element={<SettingsPage />} />
               <Route path="system/diagnostics" element={<DiagnosticsPage />} />
               <Route path="system/cleanup-history" element={<CleanupHistoryPage />} />
-              <Route path="system/logs" element={<LogsPage />} />
+              <Route path="settings/system" element={<SystemPage />} />
+              <Route path="settings/system/logs" element={<LogsPage />} />
+              <Route path="system/logs" element={<Navigate to="/settings/system/logs" replace />} />
             </Route>
           </Routes>
           </ErrorBoundary>

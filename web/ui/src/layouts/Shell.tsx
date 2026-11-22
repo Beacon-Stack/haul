@@ -6,24 +6,22 @@ import {
   FolderOpen,
   LayoutDashboard,
   Settings,
-  Stethoscope,
+  Server,
 } from "lucide-react";
 import Shell, { type NavItem } from "@beacon-shared/Shell";
 import UpdatedNotice from "@beacon-shared/UpdatedNotice";
 import { useWebSocket } from "@/api/websocket";
 import { applyTheme } from "@/theme";
 
-// nav is the static sidebar. System lives below Settings — it's the
-// admin-only escape hatch for inspecting/cleaning DB rows that the
-// regular UI doesn't surface. Always shown; the page itself explains
-// what to do if the HAUL_ADMIN_DIAGNOSTICS_ENABLED flag is off.
+// nav is the static sidebar. System and Logs sit where they do in every
+// Beacon app; diagnostics are linked from the System page.
 const nav: NavItem[] = [
   { to: "/", icon: LayoutDashboard, label: "Dashboard" },
   { to: "/activity", icon: Activity, label: "Activity" },
   { to: "/categories", icon: FolderOpen, label: "Categories" },
   { to: "/media-management", icon: FileText, label: "Media Mgmt" },
-  { to: "/system/diagnostics", icon: Stethoscope, label: "System" },
-  { to: "/system/logs", icon: FileText, label: "Logs" },
+  { to: "/settings/system", icon: Server, label: "System" },
+  { to: "/settings/system/logs", icon: FileText, label: "Logs" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
 
@@ -46,7 +44,7 @@ export default function HaulShell() {
       appIcon={<AppIcon />}
       mainNav={nav}
       collapsedStorageKey="haul-sidebar-collapsed"
-      overlay={<UpdatedNotice app="Haul" versionPath="/stats" />}
+      overlay={<UpdatedNotice app="Haul" />}
     />
   );
 }
