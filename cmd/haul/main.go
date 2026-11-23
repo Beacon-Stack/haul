@@ -191,14 +191,13 @@ func main() {
 		logger.Info("webhook dispatcher enabled", "targets", len(cfg.Webhooks))
 	}
 
-	// ── External command hooks ────────────────────────────────────────────
+	// ── Removed: external command hooks ───────────────────────────────────
+	// Haul used to run on_add_command / on_complete_command through a
+	// shell, pasting the torrent name into the command text, so a crafted
+	// torrent name could run commands inside Haul. Notifications replace
+	// them; say so plainly if a config still sets them.
 	if cfg.Torrent.OnAddCommand != "" || cfg.Torrent.OnCompleteCommand != "" {
-		hooks := torrent.NewHookRunner(cfg.Torrent.OnAddCommand, cfg.Torrent.OnCompleteCommand, logger)
-		bus.Subscribe(hooks.HandleEvent)
-		logger.Info("event hooks enabled",
-			"on_add", cfg.Torrent.OnAddCommand != "",
-			"on_complete", cfg.Torrent.OnCompleteCommand != "",
-		)
+		logger.Warn("on_add_command and on_complete_command are no longer supported and are ignored; use notifications instead (Settings → Notifications, or Pulse)")
 	}
 
 	// ── VPN check (non-blocking — IP lookup can be slow in containers) ───
