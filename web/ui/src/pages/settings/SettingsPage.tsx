@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Wifi, Download, Upload,
-  Zap, Shield, Clock, Terminal, Monitor, Moon, Sun, Check,
+  Zap, Shield, Clock, Monitor, Moon, Sun, Check,
 } from "lucide-react";
 import { useSettingsForm, SaveButton, ToggleRow, FieldRow } from "@/components/settings/SettingsForm";
 import {
@@ -354,24 +354,6 @@ export default function SettingsPage() {
         </SectionCard>
         </div>
 
-        {/* Row 4: Hooks + Health */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "stretch" }}>
-        {/* ── Hooks ──────────────────────────────────────────────────────── */}
-        <SectionCard title="External Commands" icon={Terminal} advanced={<>
-          <FieldRow label="Run on torrent added" description="Shell command executed when a torrent is added. Variables: %h (hash), %n (name), %c (category).">
-            <input value={getStr("on_add_command")} onChange={(e) => set("on_add_command", e.target.value)} placeholder="e.g. /path/to/script.sh %h %n" className="settings-input settings-input-mono" />
-          </FieldRow>
-
-          <FieldRow label="Run on torrent completed" description="Shell command executed when a torrent finishes downloading. Variables: %h (hash), %n (name), %p (path), %c (category).">
-            <input value={getStr("on_complete_command")} onChange={(e) => set("on_complete_command", e.target.value)} placeholder="e.g. /path/to/import.sh %p" className="settings-input settings-input-mono" />
-          </FieldRow>
-        </>}>
-          <p style={{ margin: 0, fontSize: 12, color: "var(--color-text-muted)" }}>
-            Run shell commands when torrents are added or completed. Useful for post-processing scripts.
-          </p>
-        </SectionCard>
-
-        </div>
 
         <p style={{ margin: 0, fontSize: 12, color: "var(--color-text-muted)" }}>
             Startup settings are configured via config.yaml or HAUL_* environment variables.
