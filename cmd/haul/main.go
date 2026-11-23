@@ -25,6 +25,7 @@ import (
 	"github.com/beacon-stack/haul/internal/pulse"
 	"github.com/beacon-stack/haul/internal/version"
 	"github.com/beacon-stack/haul/web"
+	"github.com/beacon-stack/pulse/pkg/healthcheck"
 	beaconlog "github.com/beacon-stack/pulse/pkg/log"
 	"github.com/beacon-stack/pulse/pkg/log/plugins/file"
 	"github.com/beacon-stack/pulse/pkg/log/plugins/loki"
@@ -47,6 +48,9 @@ func (a *sessionAdminAdapter) LiveHashes() map[string]struct{} {
 }
 
 func main() {
+	// "haul healthcheck" (and the wget link) answer the container health
+	// check and exit; the image has no shell or wget of its own.
+	healthcheck.Run(os.Args, "http://127.0.0.1:"+envOr("HAUL_SERVER_PORT", "8484")+"/health")
 	cfgFile := flag.String("config", "", "path to config file")
 	flag.Parse()
 	startTime := time.Now()
@@ -349,4 +353,12 @@ func main() {
 	}
 
 	logger.Info(version.AppName + " stopped")
+}
+
+// envOr returns the environment variable, or def when it's unset.
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

@@ -46,33 +46,37 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
                 -s -w" \
       -o /haul ./cmd/haul
 
-# ── Final stage ───────────────────────────────────────────────────────────────
-FROM alpine:3.21
+# Files for the final image, which has no shell to make them: the config
+# folder (owned by the app's user) and a "wget" link to the app, so
+# compose health checks written for the old image keep working.
+RUN mkdir -p /rootfs/config /rootfs/usr/bin && ln -s /usr/local/bin/haul /rootfs/usr/bin/wget
 
-# ca-certificates is needed for outbound HTTPS to trackers and indexers.
-# tzdata provides timezone data for correct time display in the UI.
-RUN apk add --no-cache ca-certificates tzdata && \
-    adduser -D -u 1000 haul
+
+# ── Final stage ───────────────────────────────────────────────────────────────
+# Distroless: the app, CA certificates, timezone data and /tmp. No shell,
+# no package manager, nothing to patch. Pinned by digest; bump on purpose.
+FROM gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2
 
 COPY --from=builder /haul /usr/local/bin/haul
+COPY --from=builder /rootfs/usr/bin/ /usr/bin/
+COPY --from=builder --chown=1000:1000 /rootfs/config /config
 
-# Beacon-stack-shaped defaults — the published image expects to land in a
-# compose with a service named `pulse`. For standalone use, override these
-# via the container's `environment:` block; env always beats Dockerfile ENV.
-# See docker/docker-compose.yml for the standalone recipe.
 ENV HAUL_DATABASE_PATH=/config/haul.db \
     HAUL_PULSE_URL=http://pulse:9696 \
     HAUL_TORRENT_LISTEN_PORT=6881 \
     HAUL_TORRENT_DOWNLOAD_DIR=/downloads \
     HAUL_LOG_LEVEL=info \
-    TZ=UTC
+    TZ=UTC \
+    HOME=/config
 
-# /config holds the local database and settings; /downloads holds torrent data.
 VOLUME ["/config", "/downloads"]
 
-# Web UI + API / peer-wire / peer-wire UDP.
 EXPOSE 8484 6881 6881/udp
 
-USER haul
+# The same user ID as the old Alpine image, so existing /config folders
+# keep working.
+USER 1000:1000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["/usr/local/bin/haul", "healthcheck"]
 
 ENTRYPOINT ["/usr/local/bin/haul"]
