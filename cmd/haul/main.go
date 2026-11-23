@@ -21,12 +21,14 @@ import (
 	"github.com/beacon-stack/haul/internal/db"
 	"github.com/beacon-stack/haul/internal/db/admin"
 	"github.com/beacon-stack/haul/internal/events"
+	"github.com/beacon-stack/haul/internal/notifications"
 	"github.com/beacon-stack/haul/internal/pulse"
 	"github.com/beacon-stack/haul/internal/version"
 	"github.com/beacon-stack/haul/web"
 	beaconlog "github.com/beacon-stack/pulse/pkg/log"
 	"github.com/beacon-stack/pulse/pkg/log/plugins/file"
 	"github.com/beacon-stack/pulse/pkg/log/plugins/loki"
+	"github.com/beacon-stack/pulse/pkg/notify"
 )
 
 // sessionAdminAdapter adapts the torrent.Session to the narrow surface
@@ -184,12 +186,25 @@ func main() {
 	categorySvc := category.NewService(database.SQL)
 	tagSvc := tag.NewService(database.SQL)
 
-	// ── Webhook dispatcher ────────────────────────────────────────────────
-	if len(cfg.Webhooks) > 0 {
-		whDispatcher := torrent.NewWebhookDispatcher(cfg.Webhooks, logger)
-		bus.Subscribe(whDispatcher.HandleEvent)
-		logger.Info("webhook dispatcher enabled", "targets", len(cfg.Webhooks))
+	// ── Notifications ─────────────────────────────────────────────────────
+	// Through Pulse when connected to one that has channels, otherwise from
+	// Haul's own channels (pulse/pkg/notify). Config-file webhooks are
+	// brought over as channels once.
+	notifyStore, notifyOutbox, err := notifications.Setup(context.Background(), notifications.Deps{
+		DB: database.SQL, Torrents: session, Bus: bus, Log: logger, Webhooks: cfg.Webhooks,
+		Hub: func() notify.Hub {
+			if pulseIntegration == nil || pulseIntegration.Client == nil {
+				return nil
+			}
+			return pulseIntegration.Client.NotifyHub()
+		},
+	})
+	if err != nil {
+		logger.Error("notifications unavailable", "error", err)
+		os.Exit(1)
 	}
+	go notifyOutbox.Run(context.Background())
+	go (&notify.HealthWatcher{Outbox: notifyOutbox, Check: notifications.HealthCheck(session.GetHealth)}).Run(context.Background())
 
 	// ── Removed: external command hooks ───────────────────────────────────
 	// Haul used to run on_add_command / on_complete_command through a
@@ -280,18 +295,20 @@ func main() {
 
 	// ── HTTP router ───────────────────────────────────────────────────────
 	router := api.NewRouter(api.RouterConfig{
-		StartTime:  startTime,
-		DBPath:     cfg.Database.Path,
-		Logger:     logger,
-		Session:    session,
-		WSHub:      wsHub,
-		Categories: categorySvc,
-		Tags:       tagSvc,
-		DB:         database.SQL,
-		Admin:      adminGate,
-		Pulse:      pulseIntegration,
-		LogSystem:  logSystem,
-		DockerLogs: dockerLogs,
+		StartTime:    startTime,
+		DBPath:       cfg.Database.Path,
+		Logger:       logger,
+		Session:      session,
+		WSHub:        wsHub,
+		Categories:   categorySvc,
+		Tags:         tagSvc,
+		DB:           database.SQL,
+		Admin:        adminGate,
+		Pulse:        pulseIntegration,
+		LogSystem:    logSystem,
+		DockerLogs:   dockerLogs,
+		NotifyStore:  notifyStore,
+		NotifyOutbox: notifyOutbox,
 	})
 
 	// Mount the embedded web UI as a catch-all.

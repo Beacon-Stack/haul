@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import {
   Activity,
   Anchor,
+  Bell,
   FileText,
   FolderOpen,
   LayoutDashboard,
@@ -20,6 +21,7 @@ const nav: NavItem[] = [
   { to: "/activity", icon: Activity, label: "Activity" },
   { to: "/categories", icon: FolderOpen, label: "Categories" },
   { to: "/media-management", icon: FileText, label: "Media Mgmt" },
+  { to: "/settings/notifications", icon: Bell, label: "Notifications" },
   { to: "/settings/system", icon: Server, label: "System" },
   { to: "/settings/system/logs", icon: FileText, label: "Logs" },
   { to: "/settings", icon: Settings, label: "Settings" },

@@ -13,6 +13,7 @@ import SettingsPage from "@/pages/settings/SettingsPage";
 import MediaManagementPage from "@/pages/media-management/MediaManagementPage";
 import DiagnosticsPage from "@/pages/system/Diagnostics";
 import CleanupHistoryPage from "@/pages/system/CleanupHistory";
+import Notifications from "@beacon-shared/Notifications";
 import SystemPage from "@/pages/settings/system/SystemPage";
 import LogsPage from "@/pages/settings/system/Logs";
 
@@ -37,6 +38,7 @@ export default function App() {
               <Route path="settings" element={<SettingsPage />} />
               <Route path="system/diagnostics" element={<DiagnosticsPage />} />
               <Route path="system/cleanup-history" element={<CleanupHistoryPage />} />
+              <Route path="settings/notifications" element={<Notifications />} />
               <Route path="settings/system" element={<SystemPage />} />
               <Route path="settings/system/logs" element={<LogsPage />} />
               <Route path="system/logs" element={<Navigate to="/settings/system/logs" replace />} />

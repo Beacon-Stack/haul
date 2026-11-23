@@ -22,6 +22,8 @@ import (
 	"github.com/beacon-stack/haul/internal/pulse"
 	"github.com/beacon-stack/haul/internal/version"
 	beaconlog "github.com/beacon-stack/pulse/pkg/log"
+	"github.com/beacon-stack/pulse/pkg/notify"
+	"github.com/beacon-stack/pulse/pkg/notify/notifyapi"
 )
 
 // sanitizeFilename strips characters that would confuse filesystems or
@@ -61,8 +63,11 @@ type RouterConfig struct {
 	// is non-nil, /api/v1/system/{logs,log-level} are registered.
 	// When DockerLogs is also non-nil, /api/v1/system/logs/docker
 	// is registered for full-history access.
-	LogSystem  *beaconlog.System
-	DockerLogs *beaconlog.DockerLogsReader
+	LogSystem *beaconlog.System
+	// Notifications (pulse/pkg/notify); nil leaves the API out.
+	NotifyStore  *notify.Store
+	NotifyOutbox *notify.Outbox
+	DockerLogs   *beaconlog.DockerLogsReader
 }
 
 // AdminGate is the runtime knob for the admin-only endpoints. Held by
@@ -132,6 +137,9 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	v1.RegisterPeerRoutes(humaAPI, cfg.Pulse)
 	v1.RegisterResearchRoutes(humaAPI, cfg.Session, cfg.Pulse)
 
+	if cfg.NotifyStore != nil && cfg.NotifyOutbox != nil {
+		notifyapi.Register(humaAPI, notifyapi.Options{App: "Haul", Store: cfg.NotifyStore, Outbox: cfg.NotifyOutbox})
+	}
 	if cfg.LogSystem != nil {
 		beaconlog.RegisterRoutesWithDocker(humaAPI, cfg.LogSystem, cfg.DockerLogs)
 	}
