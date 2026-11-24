@@ -9,7 +9,7 @@ export interface DiagnosticSummary {
   row_count: number;
 }
 
-export interface DiagnosticRow {
+interface DiagnosticRow {
   id: string;
   summary: string;
   why_flagged: string;

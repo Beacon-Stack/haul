@@ -64,7 +64,7 @@ export interface PeerInfo {
   uploaded: number;      // total bytes written to this peer
 }
 
-export type PieceRunState = "complete" | "partial" | "checking" | "missing";
+type PieceRunState = "complete" | "partial" | "checking" | "missing";
 
 export interface PieceStateRun {
   length: number;

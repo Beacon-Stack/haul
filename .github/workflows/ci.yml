@@ -53,11 +53,9 @@ jobs:
         run: npm run build
         working-directory: web/ui
 
-      # The built bundle is committed (web/static is embedded via go:embed
-      # so `go build` works without npm). Fail if a UI change shipped
-      # without regenerating it.
-      - name: Verify committed web/static is fresh
-        run: git diff --exit-code -- web/static
+      - name: No unused files, exports or packages
+        run: npm run deadcode
+        working-directory: web/ui
 
   lint:
     name: Lint
@@ -81,6 +79,9 @@ jobs:
         # is large enough that the default 1m context-load timeout sometimes
         # trips with "JSON decoding failed: unexpected EOF". Bump to 5m.
         run: golangci-lint run --timeout=5m
+
+      - name: No unreachable code
+        run: make deadcode/go
 
   build:
     name: Build

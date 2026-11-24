@@ -4,9 +4,9 @@
 
 // Mirror the server-side cap in internal/api/v1/torrents.go. The server
 // re-validates, but rejecting on the client avoids a wasted round-trip.
-export const MAX_TORRENT_FILE_BYTES = 10 * 1024 * 1024;
+const MAX_TORRENT_FILE_BYTES = 10 * 1024 * 1024;
 
-export const TORRENT_DATA_URI_PREFIX = "data:application/x-bittorrent;base64,";
+const TORRENT_DATA_URI_PREFIX = "data:application/x-bittorrent;base64,";
 
 export type ValidateResult =
   | { ok: true }
