@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/beacon-stack/pulse/pkg/auth"
+	"github.com/beacon-stack/pulse/pkg/auth/authapi"
+
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
@@ -43,6 +46,9 @@ func sanitizeFilename(s string) string {
 
 // RouterConfig holds everything the router needs.
 type RouterConfig struct {
+	// Gate decides who may use the app (pulse/pkg/auth). When nil, one is
+	// built with default settings: no login, local network only.
+	Gate       *auth.Auth
 	StartTime  time.Time // shown on the System page
 	DBPath     string
 	Logger     *slog.Logger
@@ -90,15 +96,29 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	r.Use(middleware.RequestLogger(cfg.Logger))
 	r.Use(middleware.Recovery(cfg.Logger))
 
+	// Who may use the app: by default the local network without a login.
+	// Login, logout and status are the only open /api routes.
+	gate := cfg.Gate
+	if gate == nil {
+		gate = auth.New(auth.Options{App: "Haul"}, auth.Settings{})
+	}
+	r.Get("/api/v1/auth/status", gate.StatusHandler())
+	r.Post("/api/v1/auth/login", gate.LoginHandler())
+	r.Post("/api/v1/auth/logout", gate.LogoutHandler())
+
+	// Everything registered on protected goes through the gate. It is
+	// attached per route, not by path prefix, so nothing routes around it.
+	protected := r.With(gate.Middleware)
+
 	// WebSocket
 	if cfg.WSHub != nil {
-		r.Get("/api/v1/ws", cfg.WSHub.ServeHTTP)
+		protected.Get("/api/v1/ws", cfg.WSHub.ServeHTTP)
 	}
 
 	// .torrent file export. Registered as a chi route because Huma
 	// shapes responses as JSON; we want to stream raw BYTEA bytes with
 	// a Content-Disposition header so a browser fetch can save-as.
-	r.Get("/api/v1/torrents/{hash}/torrent_file", func(w http.ResponseWriter, r *http.Request) {
+	protected.Get("/api/v1/torrents/{hash}/torrent_file", func(w http.ResponseWriter, r *http.Request) {
 		hash := chi.URLParam(r, "hash")
 		data, err := cfg.Session.ExportTorrent(hash)
 		if err != nil {
@@ -128,7 +148,9 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	humaConfig := huma.DefaultConfig(version.AppName+" API", version.Version)
 	humaConfig.DocsPath = "/api/docs"
 	humaConfig.OpenAPIPath = "/api/openapi"
-	humaAPI := humachi.New(r, humaConfig)
+	humaAPI := humachi.New(protected, humaConfig)
+
+	authapi.Register(humaAPI, gate)
 
 	v1.RegisterTorrentRoutes(humaAPI, cfg.Session)
 	v1.RegisterTorrentControlRoutes(humaAPI, cfg.Session)

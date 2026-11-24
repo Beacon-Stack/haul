@@ -13,6 +13,7 @@ import {
   setThemePreset,
 } from "@/theme";
 import type { ThemeMode } from "@/theme";
+import Security from "@beacon-shared/Security";
 
 // Appearance
 
@@ -353,6 +354,10 @@ export default function SettingsPage() {
           </FieldRow>
         </SectionCard>
         </div>
+
+
+        <Security />
+
 
 
         <p style={{ margin: 0, fontSize: 12, color: "var(--color-text-muted)" }}>

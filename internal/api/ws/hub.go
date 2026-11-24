@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -53,16 +52,10 @@ func (h *Hub) HandleEvent(_ context.Context, e events.Event) {
 	}
 }
 
-// ServeHTTP upgrades the connection to WebSocket.
+// ServeHTTP upgrades the connection to WebSocket. It has no
+// authentication of its own: the router mounts it behind the auth gate
+// (pulse/pkg/auth), which also rejects cross-site handshakes.
 func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	isWSUpgrade := strings.EqualFold(r.Header.Get("Upgrade"), "websocket")
-	isSameOrigin := r.Header.Get("Sec-Fetch-Site") == "same-origin"
-
-	if !isWSUpgrade && !isSameOrigin {
-		http.Error(w, `{"status":401,"title":"Unauthorized"}`, http.StatusUnauthorized)
-		return
-	}
-
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 		CompressionMode:    websocket.CompressionContextTakeover,

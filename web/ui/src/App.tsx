@@ -16,6 +16,7 @@ import CleanupHistoryPage from "@/pages/system/CleanupHistory";
 import Notifications from "@beacon-shared/Notifications";
 import SystemPage from "@/pages/settings/system/SystemPage";
 import LogsPage from "@/pages/settings/system/Logs";
+import LoginPage from "@beacon-shared/LoginPage";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 5000 } },
@@ -28,6 +29,7 @@ export default function App() {
         <BrowserRouter>
           <ErrorBoundary>
           <Routes>
+            <Route path="login" element={<LoginPage />} />
             <Route element={<Shell />}>
               <Route index element={<TorrentList />} />
               <Route path="torrents/:hash" element={<TorrentDetail />} />

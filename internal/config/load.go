@@ -1,8 +1,6 @@
 package config
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -153,19 +151,6 @@ func Load(cfgFile string) (*Config, error) {
 
 	cfg.ConfigFile = configFileUsed
 	return &cfg, nil
-}
-
-// EnsureAPIKey generates a random API key if none is configured.
-func EnsureAPIKey(cfg *Config) (generated bool, err error) {
-	if !cfg.Auth.APIKey.IsEmpty() {
-		return false, nil
-	}
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return false, fmt.Errorf("generating API key: %w", err)
-	}
-	cfg.Auth.APIKey = Secret(hex.EncodeToString(b))
-	return true, nil
 }
 
 func secretDecodeHook(from reflect.Type, to reflect.Type, data any) (any, error) {
