@@ -186,7 +186,7 @@ func (s *Session) CheckStalls(ctx context.Context) {
 
 		now := time.Now()
 
-		// ── First-peer observation (all torrents, pre-metadata included) ──
+		// First-peer observation (all torrents, pre-metadata included)
 		// If the torrent handle has active peers, timestamp that. The
 		// managedTorrent.t handle is always non-nil after Add(), even
 		// before metadata arrives — stats are accessible.
@@ -200,7 +200,7 @@ func (s *Session) CheckStalls(ctx context.Context) {
 			s.mu.Unlock()
 		}
 
-		// ── Activity bookkeeping ───────────────────────────────────────
+		// Activity bookkeeping
 		// CheckStalls is the writer of lastActivityAt: record download
 		// progress before classifying. Only meaningful once metadata has
 		// arrived (BytesReadData needs a real transfer).

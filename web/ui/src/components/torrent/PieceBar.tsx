@@ -14,8 +14,6 @@ import {
 // PieceBar — canvas-rendered torrent piece visualization with per-piece
 // arrival animation, file hover, and auto-stopping rAF loop.
 //
-// Design doc: plans/haul-torrent-detail-enhancements.md §4
-//
 // Key properties:
 //  - Single pixel column per piece (adaptive via runsToColumns when more
 //    pieces than pixels). Spatial position is preserved — a piece from the

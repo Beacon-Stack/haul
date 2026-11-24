@@ -4,7 +4,7 @@ import type { PeerInfo } from "@/api/torrents";
 import { formatSpeed } from "@/lib/format";
 
 // PeerList — compact table of connected peers, 6 columns, sortable by
-// download/upload/progress. See plans/haul-torrent-detail-enhancements.md §5.
+// download/upload/progress.
 //
 // No GeoIP, no encryption-type inspection, no per-block transfer detail —
 // those are all future work. This is the "glanceable who am I talking to"

@@ -20,7 +20,7 @@ import (
 	"testing"
 )
 
-// ── uniquePath ───────────────────────────────────────────────────────────────
+// uniquePath
 
 func TestUniquePath_NonExistentReturnsInput(t *testing.T) {
 	dir := t.TempDir()
@@ -147,7 +147,7 @@ func itoa(i int) string {
 	return out
 }
 
-// ── isMediaExt ───────────────────────────────────────────────────────────────
+// isMediaExt
 
 func TestIsMediaExt(t *testing.T) {
 	// Spot-check across categories: video, audio, subtitle, plus

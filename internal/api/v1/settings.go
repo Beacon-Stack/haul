@@ -15,11 +15,9 @@ package v1
 //   2. Initialize it in NewSession from cfg AND the DB overlay
 //   3. Add a Set*() method that both updates the field and logs the change
 //   4. Add a case in applyRuntimeSettings() below
-//   5. Extend the regression test in settings_test.go to cover the new key
+//   5. Extend the test in settings_test.go to cover the new key
 //
-// If you DON'T do these steps, the user will see a toggle in the UI that
-// appears to save but has no actual effect — which is exactly the bug
-// that brought us here for `pause_on_complete`.
+// Without these steps the toggle in the UI saves and has no effect.
 
 import (
 	"context"

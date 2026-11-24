@@ -477,7 +477,7 @@ func newTestSession(t *testing.T) *Session {
 	return session
 }
 
-// ── GetStallInfo direct unit tests ─────────────────────────────────────────
+// GetStallInfo direct unit tests
 //
 // These guard the per-torrent stall surface (`/api/v1/torrents/{hash}/stall`)
 // against drifting from the bulk surface (CheckStalls / ListStalled). All
@@ -591,7 +591,7 @@ func TestGetStallInfo_PreMetadataWithinTimeoutNotStalled(t *testing.T) {
 	}
 }
 
-// ── Info.Stalled per-row exposure ─────────────────────────────────────────
+// Info.Stalled per-row exposure
 //
 // The dashboard's `Stalled` filter pill counts torrents where Info.Stalled
 // is true. Before this fix, a pre-metadata magnet that never observed a

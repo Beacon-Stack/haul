@@ -55,7 +55,7 @@ func validateAddTorrentURI(uri string) error {
 	}
 }
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// Types
 
 type addTorrentInput struct {
 	Body struct {
@@ -119,7 +119,7 @@ type removeTrackerInput struct {
 	URL  string `query:"url" doc:"Tracker URL to remove"`
 }
 
-// ── Registration ─────────────────────────────────────────────────────────────
+// Registration
 
 // RegisterTorrentRoutes registers the /api/v1/torrents endpoints.
 func RegisterTorrentRoutes(api huma.API, session *torrent.Session) {

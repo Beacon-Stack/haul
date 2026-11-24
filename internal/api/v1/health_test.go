@@ -67,7 +67,7 @@ func newHealthAPI(t *testing.T) (*torrent.Session, humatest.TestAPI) {
 	return session, api
 }
 
-// ── /api/v1/torrents/{hash}/stall ─────────────────────────────────────────
+// /api/v1/torrents/{hash}/stall
 
 // Unknown torrent hashes must 404, not 200-with-zero-shaped body.
 // Pilot's stallwatcher relies on this distinction to skip torrents that
@@ -125,7 +125,7 @@ func TestGetTorrentStall_NoPeersEverShape(t *testing.T) {
 	}
 }
 
-// ── /api/v1/stalls ────────────────────────────────────────────────────────
+// /api/v1/stalls
 
 // During the session-startup grace period the bulk endpoint must return
 // an empty array — not nil and not 500. Pilot's stallwatcher decodes

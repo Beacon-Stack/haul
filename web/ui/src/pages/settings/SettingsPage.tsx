@@ -14,7 +14,7 @@ import {
 } from "@/theme";
 import type { ThemeMode } from "@/theme";
 
-// ── Appearance ────────────────────────────────────────────────────────────
+// Appearance
 
 function AppearanceSection() {
   const [mode, setMode] = useState<ThemeMode>(getStoredMode);
@@ -145,7 +145,7 @@ function AppearanceSection() {
   );
 }
 
-// ── Reusable components ───────────────────────────────────────────────────
+// Reusable components
 
 function SectionCard({ title, icon: Icon, children, advanced }: {
   title: string; icon: React.ElementType; children: React.ReactNode; advanced?: React.ReactNode;
@@ -198,7 +198,7 @@ function SectionCard({ title, icon: Icon, children, advanced }: {
 
 // Disk-scale formatter: the dashboard cares about GB/TB, not KB.
 
-// ── Settings Page ─────────────────────────────────────────────────────────
+// Settings Page
 
 export default function SettingsPage() {
   const { dirty, saving, set, getBool, getNum, getStr, handleSave } = useSettingsForm();
@@ -222,14 +222,14 @@ export default function SettingsPage() {
 
         {/* Row 1: Downloads + Speed */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
-        {/* ── Downloads ──────────────────────────────────────────────────── */}
+        {/* Downloads */}
         <SectionCard title="Downloads" icon={Download}>
           <FieldRow label="Default Save Path" description="Where new torrents save their data by default.">
             <input value={getStr("download_dir", "/home/Downloads")} onChange={(e) => set("download_dir", e.target.value)} className="settings-input" />
           </FieldRow>
         </SectionCard>
 
-        {/* ── Speed ──────────────────────────────────────────────────────── */}
+        {/* Speed */}
         <SectionCard title="Speed" icon={Zap} advanced={<>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <FieldRow label="Alt Download Limit (KB/s)" description="Used during scheduled slow mode">
@@ -278,7 +278,7 @@ export default function SettingsPage() {
 
         {/* Row 2: BitTorrent + Seeding */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
-        {/* ── BitTorrent ─────────────────────────────────────────────────── */}
+        {/* BitTorrent */}
         <SectionCard title="BitTorrent" icon={Shield} advanced={<>
           <ToggleRow label="DHT" description="Distributed Hash Table for decentralized peer discovery." checked={getBool("enable_dht", true)} onChange={(v) => set("enable_dht", String(v))} />
           <ToggleRow label="PEX" description="Peer Exchange — learn about peers from other peers." checked={getBool("enable_pex", true)} onChange={(v) => set("enable_pex", String(v))} />
@@ -294,7 +294,7 @@ export default function SettingsPage() {
           </FieldRow>
         </SectionCard>
 
-        {/* ── Seeding ────────────────────────────────────────────────────── */}
+        {/* Seeding */}
         <SectionCard title="Seeding" icon={Upload} advanced={<>
           <FieldRow label="Default Seed Time (minutes)" description="0 = unlimited. Stop seeding after this many minutes.">
             <input type="number" min={0} value={getNum("default_seed_time")} onChange={(e) => set("default_seed_time", e.target.value)} className="settings-input" />
@@ -326,7 +326,7 @@ export default function SettingsPage() {
 
         {/* Row 3: Connection + Queue */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
-        {/* ── Connection ─────────────────────────────────────────────────── */}
+        {/* Connection */}
         <SectionCard title="Connection" icon={Wifi} advanced={<>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <FieldRow label="Max Global Connections" description="0 = unlimited">
@@ -342,7 +342,7 @@ export default function SettingsPage() {
           </FieldRow>
         </SectionCard>
 
-        {/* ── Queue ──────────────────────────────────────────────────────── */}
+        {/* Queue */}
         <SectionCard title="Queue" icon={Clock} advanced={<>
           <FieldRow label="Stall Timeout (seconds)" description="Seconds of no data before a torrent is considered stalled. Triggers auto-remediation.">
             <input type="number" min={30} value={getNum("stall_timeout", 120)} onChange={(e) => set("stall_timeout", e.target.value)} className="settings-input" />

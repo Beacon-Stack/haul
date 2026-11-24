@@ -150,7 +150,7 @@ func TestQueueGateDecision_ExactCapIsNoOp(t *testing.T) {
 	}
 }
 
-// ── Wiring tests ─────────────────────────────────────────────────────────────
+// Wiring tests
 //
 // These exercise the Session-level integration: that Pause clears
 // queuePaused (sticky semantics), Resume clears it, and SetMaxActiveDownloads

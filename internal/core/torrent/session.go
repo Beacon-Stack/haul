@@ -1,15 +1,10 @@
 // Package torrent owns the anacrolix/torrent client lifecycle and the
 // Session type that exposes it to the rest of haul.
 //
-// ⚠  Before changing anything in this file, run:
-//
-//	go test ./internal/core/torrent/... -run TestSessionIntegration_DownloadFromPeer
-//
-// This test spins up a local seeder and verifies the Session can actually
-// download through its configured peer-wire / DHT / IPBlocklist wiring.
-// The "torrent stalls at 0 peers" bug has regressed three times — the
-// test catches it in <1s. See haul/CLAUDE.md for the full list of files
-// guarded by this regression suite.
+// The session's wiring (listen port, DHT, IP blocklist, trackers) is easy
+// to break in ways that leave every torrent at zero peers.
+// TestSessionIntegration_DownloadFromPeer downloads from a local seeder
+// through that wiring in under a second; run it after changing any of it.
 package torrent
 
 import (
@@ -140,9 +135,8 @@ type PieceStateRun struct {
 	State  string `json:"state"` // "complete" | "partial" | "checking" | "missing"
 }
 
-// PiecesInfo is a snapshot of a torrent's piece-level state. See
-// plans/haul-torrent-detail-enhancements.md §4 for how the frontend consumes
-// this (canvas-rendered piece bar with per-piece arrival flashes).
+// PiecesInfo is a snapshot of a torrent's piece-level state. The UI draws
+// it as a piece bar that flashes as pieces arrive.
 type PiecesInfo struct {
 	NumPieces int             `json:"num_pieces"`
 	PieceSize int64           `json:"piece_size"`
@@ -150,8 +144,8 @@ type PiecesInfo struct {
 }
 
 // TrackerInfo is a single configured tracker from the torrent's metainfo.
-// v1 does NOT include live announce state (last announce time, reported
-// peers/seeds, errors) — see plans/haul-torrent-detail-enhancements.md §6.1.
+// It carries no live announce state (last announce time, reported
+// peers/seeds, errors).
 type TrackerInfo struct {
 	Tier int    `json:"tier"`
 	URL  string `json:"url"`
@@ -275,10 +269,8 @@ type managedTorrent struct {
 // stored rate, and gaps over 30s reset the tracker entirely rather than
 // extrapolating from stale data.
 //
-// This type exists because anacrolix/torrent's Stats() only exposes
-// cumulative counters — treating those as a rate (as the previous
-// implementation did) produces nonsense ETAs. See haul/plans or git blame
-// on getInfo for the original bug.
+// It exists because anacrolix/torrent's Stats() only exposes cumulative
+// counters; treating those as a rate produces nonsense ETAs.
 type rateTracker struct {
 	mu        sync.Mutex
 	lastBytes int64
@@ -987,11 +979,9 @@ func (s *Session) List() []Info {
 // Remove removes a torrent. If deleteFiles is true, downloaded data is deleted.
 //
 // DB cleanup runs in a defer so it survives a panic from anacrolix/torrent's
-// Drop() — without that, a library-internal crash mid-Drop would leave an
-// orphan torrents row that restoreFromDB would resurrect on next startup,
-// re-triggering the same panic. Real bug observed in the field with John
-// Wick (info hash ec5086c1c…): library panic during tracker announce
-// dispatcher → DB DELETE never ran → permanent crashloop on restart.
+// Drop(). Otherwise a crash inside the library mid-Drop would leave the
+// torrents row behind, restoreFromDB would re-add it on the next start,
+// and the same panic would repeat: a crash loop.
 func (s *Session) Remove(ctx context.Context, hash string, deleteFiles bool) error {
 	s.mu.Lock()
 	mt, ok := s.torrents[hash]
@@ -1611,21 +1601,16 @@ type stallParams struct {
 //  1. Non-downloading torrents are never stalled (seeding, paused, completed,
 //     etc. — the stalled state only makes sense while trying to make progress).
 //  2. **Session-startup grace**: during the first sessionStartupGrace window
-//     after the Session was created, never report stalled. This is the fix
-//     for the "everything is red after a container restart" false positive —
-//     on restart, firstPeerAt is nil and lastActivityAt is zero (in-memory
-//     state is fresh), while addedAt is the ORIGINAL add time from the DB
-//     (possibly hours ago). Without the grace, every restored torrent looks
-//     stalled for a minute or two until peers reconnect. CheckStalls and
-//     ListStalled both honor this guard; so must we.
+//     after the Session was created, never report stalled. After a
+//     restart, firstPeerAt is nil and lastActivityAt is zero (in-memory
+//     state is fresh), while addedAt is the original add time from the DB
+//     (possibly hours ago). Without the grace, every restored torrent would
+//     look stalled for a minute or two until peers reconnect.
 //  3. "No peers ever" path: if we've never observed a peer AND the torrent
 //     has been around longer than firstPeerTimeout, call it stalled. This
-//     fires for pre-metadata torrents too (e.g. a magnet that never finds
-//     a single peer — the classic dead-torrent signal). Matches CheckStalls
-//     and ListStalled, which both classify pre-metadata torrents the same
-//     way; previously this rule required hasInfo, so the dashboard's
-//     Stalled filter pill silently read 0 even when /api/v1/stalls listed
-//     the torrent.
+//     fires for pre-metadata torrents too (a magnet that never finds a
+//     single peer is the classic dead torrent), so the dashboard's Stalled
+//     filter and /api/v1/stalls agree.
 //  4. Fully-downloaded torrents (bytesMissing == 0) are never stalled.
 //  5. Pre-metadata torrents that haven't yet hit the no-peers-ever window
 //     are never stalled — bytesMissing is meaningless without the metainfo
@@ -1649,8 +1634,8 @@ func classifyStall(p stallParams) StallInfo {
 	}
 
 	// Rule 3: no peers ever observed, past the first-peer window. This
-	// applies regardless of metadata state — the headline regression is
-	// the pre-metadata magnet that never finds a peer.
+	// applies whether or not metadata has arrived: a magnet that never
+	// finds a peer has none.
 	if p.firstPeerAt == nil && p.now.Sub(p.addedAt) > firstPeerTimeout {
 		return StallInfo{
 			Stalled:      true,
@@ -2029,10 +2014,9 @@ func (s *Session) restoreFromDB() error {
 
 	var restored, cleaned int
 	for _, r := range pending {
-		// Defensive backstop: the SELECT already filters removed_at IS NULL,
-		// but never re-add a soft-deleted torrent to the engine even if that
-		// predicate is ever dropped — a resurrected delete is the exact bug
-		// this guard exists to prevent.
+		// The SELECT already filters removed_at IS NULL; this guard makes
+		// sure a removed torrent is never re-added to the engine even if
+		// that filter is dropped.
 		if r.removedAt != nil {
 			continue
 		}

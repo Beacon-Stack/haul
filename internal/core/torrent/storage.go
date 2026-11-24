@@ -14,14 +14,12 @@ import (
 // Per-torrent storage.
 //
 // anacrolix writes a torrent's data through the storage it was added
-// with. Haul used to add every torrent with the client's default
-// storage, rooted at the startup download dir, so a torrent's save path
-// (explicit, per category, or <download dir>/<category>) was recorded
-// and reported to Pilot/Prism but the files always landed in the
-// download dir root. Imports then looked in the wrong place.
+// with, so each torrent is added with mmap storage rooted at its own save
+// path (explicit, per category, or <download dir>/<category>). With the
+// client's default storage every file would land in the download dir
+// root, whatever save path Haul reports to Pilot and Prism.
 //
-// Each torrent is now added with mmap storage rooted at its own save
-// path. Storages are cached per directory and all share the session's
+// Storages are cached per directory and all share the session's
 // piece-completion store, so resume-after-restart works the same in
 // every folder.
 

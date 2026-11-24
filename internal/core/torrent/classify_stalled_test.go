@@ -106,7 +106,7 @@ func TestClassifyStalled(t *testing.T) {
 		}
 	})
 
-	// ── The headline regression guard ────────────────────────────────────────
+	// The headline regression guard
 	// Simulates container restart: the session just started, but the torrent's
 	// addedAt is the DB-persisted original (hours ago), firstPeerAt is nil
 	// (in-memory state was reset), and lastActivityAt is zero. Without the

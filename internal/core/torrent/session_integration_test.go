@@ -62,7 +62,7 @@ func TestSessionIntegration_DownloadFromPeer(t *testing.T) {
 	publicIPDetectTimeout = 200 * time.Millisecond
 	t.Cleanup(func() { publicIPDetectTimeout = originalTimeout })
 
-	// ── 1. Create a test file for the seeder to serve ──────────────────────
+	// 1. Create a test file for the seeder to serve
 	seederRoot := t.TempDir()
 	fileName := "payload.bin"
 	const fileSize = 256 * 1024 // 256 KiB — small enough to download in <1s
@@ -75,7 +75,7 @@ func TestSessionIntegration_DownloadFromPeer(t *testing.T) {
 		t.Fatalf("writing payload: %v", err)
 	}
 
-	// ── 2. Build a .torrent metainfo for that file ─────────────────────────
+	// 2. Build a .torrent metainfo for that file
 	info := metainfo.Info{
 		PieceLength: 32 * 1024, // 32 KiB pieces = 8 pieces total
 		Name:        fileName,
@@ -93,7 +93,7 @@ func TestSessionIntegration_DownloadFromPeer(t *testing.T) {
 		t.Fatalf("encoding metainfo: %v", err)
 	}
 
-	// ── 3. Start the seeder — a bare anacrolix client ──────────────────────
+	// 3. Start the seeder — a bare anacrolix client
 	seederCfg := lt.NewDefaultClientConfig()
 	seederCfg.DataDir = seederRoot
 	seederCfg.ListenPort = 0 // ephemeral
@@ -130,7 +130,7 @@ func TestSessionIntegration_DownloadFromPeer(t *testing.T) {
 		t.Fatal("seeder has no listen addresses")
 	}
 
-	// ── 4. Start the haul Session (device under test) ──────────────────────
+	// 4. Start the haul Session (device under test)
 	downloadDir := t.TempDir()
 	sessionCfg := config.TorrentConfig{
 		ListenPort:  0, // ephemeral — avoid clashing with the seeder
@@ -152,7 +152,7 @@ func TestSessionIntegration_DownloadFromPeer(t *testing.T) {
 	}
 	t.Cleanup(session.Close)
 
-	// ── 5. Add the same torrent to the haul Session via the public Add API─
+	// 5. Add the same torrent to the haul Session via the public Add API
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	t.Cleanup(cancel)
 
@@ -184,7 +184,7 @@ func TestSessionIntegration_DownloadFromPeer(t *testing.T) {
 	}
 	mt.t.DownloadAll()
 
-	// ── 6. Inject the seeder as a direct peer ──────────────────────────────
+	// 6. Inject the seeder as a direct peer
 	peers := make([]lt.PeerInfo, 0, len(seederAddrs))
 	for _, a := range seederAddrs {
 		peers = append(peers, lt.PeerInfo{
@@ -198,7 +198,7 @@ func TestSessionIntegration_DownloadFromPeer(t *testing.T) {
 		t.Fatal("AddPeers returned 0 — session refused every seeder address")
 	}
 
-	// ── 7. Wait for the download to complete ───────────────────────────────
+	// 7. Wait for the download to complete
 	deadline := time.Now().Add(15 * time.Second)
 	var lastBytes int64
 	for time.Now().Before(deadline) {
@@ -217,7 +217,7 @@ func TestSessionIntegration_DownloadFromPeer(t *testing.T) {
 			completed, fileSize, lastBytes)
 	}
 
-	// ── 8. Verify file contents match ──────────────────────────────────────
+	// 8. Verify file contents match
 	downloadedPath := filepath.Join(downloadDir, fileName)
 	got, err := os.ReadFile(downloadedPath)
 	if err != nil {

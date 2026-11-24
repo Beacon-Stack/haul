@@ -22,7 +22,7 @@ function formatETA(secs: number): string {
   return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
 }
 
-// ── Filter types ──────────────────────────────────────────────────────────
+// Filter types
 
 // "active" is the new default — it shows every torrent except the ones the
 // user is done with. "completed" pulls all finished torrents (literal
@@ -94,7 +94,7 @@ function sortTorrents(torrents: TorrentInfo[], field: SortField): TorrentInfo[] 
   });
 }
 
-// ── Add Modal ──────────────────────────────────────────────────────────────
+// Add Modal
 
 function AddModal({ onClose }: { onClose: () => void }) {
   const [uri, setUri] = useState("");
@@ -313,7 +313,7 @@ function AddModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-// ── Torrent Row ────────────────────────────────────────────────────────────
+// Torrent Row
 
 // All status colour and label rendering goes through torrentVisual() in
 // @/lib/torrentStatus. Do NOT add inline colour switches here — drift between
@@ -510,7 +510,7 @@ const selectStyle: React.CSSProperties = {
   outline: "none",
 };
 
-// ── Page ───────────────────────────────────────────────────────────────────
+// Page
 
 export default function TorrentList() {
   const { data: torrents, isLoading } = useTorrents();
@@ -1092,7 +1092,7 @@ export default function TorrentList() {
   );
 }
 
-// ── Right-click submodals ────────────────────────────────────────────────────
+// Right-click submodals
 //
 // Each is a small inline form; nothing fancy. The category modal
 // double-duties as a category picker for both new categories and

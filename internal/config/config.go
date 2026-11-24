@@ -94,9 +94,8 @@ type TorrentConfig struct {
 	StallTimeout int `mapstructure:"stall_timeout"`
 	// PauseOnComplete immediately pauses torrents when download finishes. No seeding.
 	PauseOnComplete bool `mapstructure:"pause_on_complete"`
-	// OnAddCommand and OnCompleteCommand are no longer used. They are
-	// still read so an old config loads, and so Haul can warn that they
-	// are ignored.
+	// OnAddCommand and OnCompleteCommand are ignored. They are read only
+	// so a config that sets them still loads and Haul can warn about it.
 	OnAddCommand      string `mapstructure:"on_add_command"`
 	OnCompleteCommand string `mapstructure:"on_complete_command"`
 	// RenameOnComplete renames files on download completion when media metadata is available.
