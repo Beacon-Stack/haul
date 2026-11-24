@@ -34,7 +34,7 @@ You'll probably like Haul if you:
 - **Rename-on-complete** — when Pilot or Prism grab a torrent and pass through metadata, Haul renames the output into `Show/Season 02/Show - S02E05.mkv` format automatically
 - **Stall detection** with three classification levels. Dead torrents (no peers ever, or gone silent past the timeout) are published to `/api/v1/stalls` so Pilot's stallwatcher can blocklist them before they waste another retry
 - **VPN awareness.** Haul detects whether it's running inside a VPN tunnel and surfaces the external IP in the dashboard — useful for catching VPN drops before they become a problem
-- **Webhooks** filtered by event type (added, completed, stalled)
+- **Notifications** to Discord, Slack, Telegram, ntfy, Pushover, Gotify, email or another app's URL, sent through Pulse when connected or by Haul itself
 - **Global rate limits** with scheduled alternative-speed windows
 - **Magnet URIs, DHT, PEX, µTP**, and crash-safe resume via a persistent piece-completion store
 - **Full REST API** (OpenAPI docs at `/api/docs`) and a WebSocket event stream at `/api/v1/ws`
@@ -108,14 +108,14 @@ Most settings live in the web UI. For the ones you'll want at container-start ti
 ┌───────────────────────┐              │
 │        Haul           │◄─────────────┘
 │   (BitTorrent)        │  optional:
-│                       │  stall events, webhooks
+│                       │  stall events, notifications
 └───────────┬───────────┘
             │
             ▼
         downloads/
 ```
 
-Pilot and Prism POST to `/api/v1/torrents` when they grab a release, passing through media metadata so Haul can rename on completion. Haul fires webhooks on completion and publishes stall events to `/api/v1/stalls`, which Pilot polls to blocklist dead torrents automatically.
+Pilot and Prism POST to `/api/v1/torrents` when they grab a release, passing through media metadata so Haul can rename on completion. Haul sends notifications on completion and publishes stall events to `/api/v1/stalls`, which Pilot polls to blocklist dead torrents automatically.
 
 You can run Haul standalone and ignore the rest — the media-manager integration is opt-in via the `rename_on_complete` setting and the upstream service passing metadata.
 
@@ -133,15 +133,22 @@ A few things worth knowing if you want to go deeper than the UI:
 
 Severity escalates with inactivity: level 1 at `stall_timeout`, level 2 at 2x, level 3 (auto-pause) at 5x. Stalled torrents show up on `/api/v1/stalls`, which Pilot polls to blocklist dead releases.
 
-**Regression suite.** Haul has been bitten by dead-torrent bugs often enough that there's a locked-in test suite covering the failure modes. `make test` runs it in under two seconds. If you're editing the session wiring, stall detection, or the rate tracker, the suite will catch regressions before they ship. See [CLAUDE.md](CLAUDE.md) for the guarded files.
+**Tests.** `make test` runs the Go suite in a couple of seconds. The session-wiring, stall-detection and settings tests pin behaviour that has broken before, so fix the code rather than the test when one fails.
 
-**Webhooks.** Configure HTTP callbacks filtered by event type. Payloads are the same shape as the WebSocket events, so you can reuse your event handler code.
+**Notifications.** Set up channels in Pulse and every connected app uses them, or add them in Haul's own Settings when it runs alone. The "Other app (URL)" channel posts each event as JSON, signed if you set a secret.
 
 **API surface.** The REST API is complete — anything the UI does is available over HTTP. Interactive docs at `/api/docs`.
 
 ## Privacy
 
-Haul makes outbound connections only to peers, trackers, and the optional Pulse URL you configure. No telemetry, no analytics, no crash reporting, no update checks. API keys and credentials stay in your local database.
+Haul collects nothing: no telemetry, no analytics, no crash reporting. It connects to:
+
+- **peers and trackers** for your torrents, including a short list of public trackers it adds to public torrents;
+- **api.ipify.org**, to show the public IP address your torrents use (the VPN check on the dashboard);
+- **your notification channels, or Pulse**, if you set them up;
+- **GitHub**, only when you press Check for updates.
+
+Your browser also loads the interface fonts from Google Fonts. API keys and credentials stay in your local database.
 
 ## Built with Claude
 
@@ -153,8 +160,8 @@ Haul was built by one person with extensive help from [Claude](https://claude.ai
 make build    # compile to bin/haul
 make run      # build + run
 make web      # rebuild the frontend into web/static
-make test     # go test ./... (includes the dead-torrent regression suite)
-make check    # golangci-lint + tests
+make test     # go test ./...
+make check    # lint, dead-code checks, tests, type-check
 ```
 
 ## Contributing

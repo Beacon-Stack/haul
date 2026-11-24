@@ -1,4 +1,4 @@
-.PHONY: build check lint test run web
+.PHONY: build check deadcode deadcode/go lint test test/frontend typecheck run web
 
 build:
 	go build -o bin/haul ./cmd/haul
@@ -15,5 +15,17 @@ lint:
 test:
 	go test ./...
 
-check: lint test
+deadcode: deadcode/go
+	cd web/ui && npm run deadcode
+
+deadcode/go:
+	@out="$$(go run golang.org/x/tools/cmd/deadcode@v0.53.0 -test ./... | grep -v node_modules)"; echo "$$out"; test -z "$$out"
+
+typecheck:
+	cd web/ui && npm run typecheck
+
+test/frontend:
+	cd web/ui && npm test
+
+check: lint deadcode test typecheck test/frontend
 	@echo "all checks passed"
