@@ -30,7 +30,7 @@ type HealthReport struct {
 	ExternalIP      string `json:"external_ip,omitempty"`
 }
 
-// ── VPN Detection ────────────────────────────────────────────────────────────
+// VPN Detection
 
 var (
 	vpnActive  bool

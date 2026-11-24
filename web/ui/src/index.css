@@ -19,7 +19,7 @@
   --color-text-secondary: #a8a8c0;
   --color-text-muted:     #6e6e8a;
 
-  /* ── Torrent status colors ─────────────────────────────────────────────────
+  /* Torrent status colors
      Each state has a unique colour with no overlap. The frontend reads these
      via the canonical helper in lib/torrentStatus.ts — never inline.
 

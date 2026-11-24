@@ -4,9 +4,8 @@ package torrent
 // (Peers / Pieces / Trackers) added for the torrent detail page.
 //
 // These guard the contract that the frontend's canvas piece bar and peer
-// list rely on. See plans/haul-torrent-detail-enhancements.md for the full
-// design context. If these tests fail, something in anacrolix's API shape
-// changed or the Session helper drifted away from what the plan assumed.
+// list rely on. If these tests fail, something in anacrolix's API shape
+// changed or the Session helper drifted from what the UI expects.
 
 import (
 	"bytes"
@@ -88,7 +87,7 @@ func addTestTorrent(t *testing.T, s *Session, trackers [][]string) (hash string,
 	return resp.InfoHash, buf.Bytes()
 }
 
-// ── Peers ─────────────────────────────────────────────────────────────────────
+// Peers
 
 // TestSession_Peers_UnknownHash asserts Peers returns an error for a hash
 // that isn't in the session (matches the Get() behaviour and lets the HTTP
@@ -239,7 +238,7 @@ func TestSession_Peers_IncludesConnectedPeer(t *testing.T) {
 	}
 }
 
-// ── Pieces ────────────────────────────────────────────────────────────────────
+// Pieces
 
 // TestSession_Pieces_UnknownHash asserts the error path matches Peers.
 func TestSession_Pieces_UnknownHash(t *testing.T) {
@@ -293,7 +292,7 @@ func TestSession_Pieces_ReturnsRunsForReadyTorrent(t *testing.T) {
 	}
 }
 
-// ── Trackers ──────────────────────────────────────────────────────────────────
+// Trackers
 
 // TestSession_Trackers_FromMetainfo asserts AnnounceList is flattened with
 // tier numbers preserved. This is the data the frontend TrackerList renders.

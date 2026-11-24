@@ -95,10 +95,9 @@ func RegisterAdminCleanupHistoryRoutes(api huma.API, registry *adminpkg.Registry
 			return nil, huma.Error500InternalServerError(err.Error())
 		}
 
-		// Restoration is per-table because column lists differ. Today
-		// only `torrents` is supported (the only soft-deletable resource
-		// shipped in Phase A1). New diagnostics that introduce new
-		// source_tables must extend this switch.
+		// Restoration is per-table because column lists differ. Only
+		// `torrents` is supported, the one soft-deletable resource. A
+		// diagnostic that adds a new source table must extend this switch.
 		out := &cleanupHistoryRestoreOutput{}
 		var restored bool
 		switch entry.SourceTable {
@@ -158,13 +157,11 @@ func RegisterAdminCleanupHistoryRoutes(api huma.API, registry *adminpkg.Registry
 // ON CONFLICT DO NOTHING so a same-PK row that's appeared in the meantime
 // isn't overwritten.
 //
-// SQLite has no equivalent of Postgres' jsonb_populate_record. To stay
-// schema-agnostic across future migrations we (a) read the current torrents
-// column set from PRAGMA table_info, (b) parse the captured JSON snapshot,
-// (c) drop any JSON keys that no longer match a real column, then (d)
-// build a parameterised INSERT from what's left. New columns (added since
-// the snapshot was taken) just get their DDL defaults; removed columns are
-// silently skipped — same recovery semantics as the old Postgres path.
+// To keep working across schema changes it (a) reads the current torrents
+// columns from PRAGMA table_info, (b) parses the captured JSON snapshot,
+// (c) drops JSON keys that aren't a column any more, then (d) builds a
+// parameterised INSERT from what's left. Columns added since the snapshot
+// get their defaults; removed columns are skipped.
 func restoreTorrentRow(ctx context.Context, db *sql.DB, entry *adminpkg.HistoryEntry) (bool, error) {
 	cols, err := torrentsColumns(ctx, db)
 	if err != nil {

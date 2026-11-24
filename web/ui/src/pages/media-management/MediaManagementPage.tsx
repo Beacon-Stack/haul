@@ -2,7 +2,7 @@ import { Info } from "lucide-react";
 import { usePeerServices } from "@/api/activity";
 import { useSettingsForm, SaveButton, ToggleRow, FieldRow } from "@/components/settings/SettingsForm";
 
-// ── Preview ───────────────────────────────────────────────────────────────
+// Preview
 
 function FormatPreview({ format, type }: { format: string; type: "episode" | "movie" }) {
   const tokens: Record<string, string> = type === "episode"
@@ -40,7 +40,7 @@ function FormatPreview({ format, type }: { format: string; type: "episode" | "mo
   );
 }
 
-// ── Page ──────────────────────────────────────────────────────────────────
+// Page
 
 export default function MediaManagementPage() {
   const { dirty, saving, set, getBool, getStr, handleSave } = useSettingsForm();

@@ -87,7 +87,7 @@ func makeTorrentBytes(t *testing.T, name string) []byte {
 	return buf.Bytes()
 }
 
-// ── Validation rejection paths ─────────────────────────────────────────
+// Validation rejection paths
 
 func TestAddTorrent_RejectsEmptyBody(t *testing.T) {
 	_, api := newAddAPI(t)
@@ -192,7 +192,7 @@ func TestAddTorrent_RejectsBencodedNonTorrent(t *testing.T) {
 	}
 }
 
-// ── Accept paths ───────────────────────────────────────────────────────
+// Accept paths
 
 func TestAddTorrent_AcceptsValidDataURI(t *testing.T) {
 	session, api := newAddAPI(t)

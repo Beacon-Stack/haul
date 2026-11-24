@@ -6,8 +6,6 @@
 // rows are first captured into cleanup_history as JSONB, then removed
 // from their source table. A daily sweep purges rows older than the
 // configured retention.
-//
-// See plans/db-inspector.md for the full design.
 package admin
 
 import (

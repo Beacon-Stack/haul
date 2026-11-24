@@ -1,4 +1,4 @@
-# ── Frontend build stage ──────────────────────────────────────────────────────
+# Frontend build stage
 # The UI is plain JS/CSS, the same for every platform, so build it once
 # on the runner's own platform instead of again under arm64 emulation.
 FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend
@@ -16,7 +16,7 @@ COPY web/ui/ ./web/ui/
 RUN cd web/ui && npm run build
 # Output lands in /app/web/static/
 
-# ── Go build stage ───────────────────────────────────────────────────────────
+# Go build stage
 # Go cross-compiles: build natively and target the image's platform with
 # GOOS/GOARCH. Emulating arm64 made this step ~10x slower (466 s vs 48 s).
 FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
@@ -52,7 +52,7 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH} go build \
 RUN mkdir -p /rootfs/config /rootfs/usr/bin && ln -s /usr/local/bin/haul /rootfs/usr/bin/wget
 
 
-# ── Final stage ───────────────────────────────────────────────────────────────
+# Final stage
 # Distroless: the app, CA certificates, timezone data and /tmp. No shell,
 # no package manager, nothing to patch. Pinned by digest; bump on purpose.
 FROM gcr.io/distroless/static-debian12@sha256:d75cdd72874d4790092fcb1b058493ecf6bb5bf2b2b897045b00ff01d91843f2

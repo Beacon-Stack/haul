@@ -186,7 +186,7 @@ func (s *Session) CheckStalls(ctx context.Context) {
 
 		now := time.Now()
 
-		// ── First-peer observation (all torrents, pre-metadata included) ──
+		// First-peer observation (all torrents, pre-metadata included)
 		// If the torrent handle has active peers, timestamp that. The
 		// managedTorrent.t handle is always non-nil after Add(), even
 		// before metadata arrives — stats are accessible.
@@ -200,7 +200,7 @@ func (s *Session) CheckStalls(ctx context.Context) {
 			s.mu.Unlock()
 		}
 
-		// ── Activity bookkeeping ───────────────────────────────────────
+		// Activity bookkeeping
 		// CheckStalls is the writer of lastActivityAt: record download
 		// progress before classifying. Only meaningful once metadata has
 		// arrived (BytesReadData needs a real transfer).
@@ -395,4 +395,123 @@ func nameOrEmpty(mt *managedTorrent) string {
 		return ""
 	}
 	return mt.t.Name()
+}
+
+// stallParams is the pure-function input to classifyStall. All fields
+// are primitives so the logic can be unit-tested without a real anacrolix
+// Torrent, managedTorrent, or Session.
+type stallParams struct {
+	now              time.Time
+	status           Status
+	hasInfo          bool
+	bytesMissing     int64
+	sessionStartedAt time.Time
+	addedAt          time.Time
+	firstPeerAt      *time.Time
+	lastActivityAt   time.Time
+	stallTimeout     time.Duration
+	activePeers      int
+	connectedSeeders int
+}
+
+// classifyStall is THE stall heuristic. Every stall consumer —
+// Info.Stalled on the list response, CheckStalls' escalation,
+// GetStallInfo, ListStalled (the Pilot stallwatcher endpoint) — derives
+// from this one function, so the level thresholds and reasons cannot
+// drift between them.
+//
+// Rules (in order):
+//  1. Non-downloading torrents are never stalled (seeding, paused, completed,
+//     etc. — the stalled state only makes sense while trying to make progress).
+//  2. **Session-startup grace**: during the first sessionStartupGrace window
+//     after the Session was created, never report stalled. After a
+//     restart, firstPeerAt is nil and lastActivityAt is zero (in-memory
+//     state is fresh), while addedAt is the original add time from the DB
+//     (possibly hours ago). Without the grace, every restored torrent would
+//     look stalled for a minute or two until peers reconnect.
+//  3. "No peers ever" path: if we've never observed a peer AND the torrent
+//     has been around longer than firstPeerTimeout, call it stalled. This
+//     fires for pre-metadata torrents too (a magnet that never finds a
+//     single peer is the classic dead torrent), so the dashboard's Stalled
+//     filter and /api/v1/stalls agree.
+//  4. Fully-downloaded torrents (bytesMissing == 0) are never stalled.
+//  5. Pre-metadata torrents that haven't yet hit the no-peers-ever window
+//     are never stalled — bytesMissing is meaningless without the metainfo
+//     so the activity-based check below would falsely fire.
+//  6. "No recent activity" path: if lastActivityAt is older than
+//     stallTimeout, call it stalled. Use addedAt (or firstPeerAt if later)
+//     as the baseline when lastActivityAt is zero.
+//
+// Stalled results carry a level (1 at stall_timeout, 2 at 2x, 3 at 5x,
+// or StallNoPeersEver) and a reason string from the Reason* contract.
+func classifyStall(p stallParams) StallInfo {
+	// Rule 1: non-downloading.
+	if p.status != StatusDownloading {
+		return StallInfo{}
+	}
+
+	// Rule 2: session-startup grace. Applied first so a freshly-restarted
+	// session never reports stalled even when addedAt is hours old.
+	if p.now.Sub(p.sessionStartedAt) < sessionStartupGrace {
+		return StallInfo{}
+	}
+
+	// Rule 3: no peers ever observed, past the first-peer window. This
+	// applies whether or not metadata has arrived: a magnet that never
+	// finds a peer has none.
+	if p.firstPeerAt == nil && p.now.Sub(p.addedAt) > firstPeerTimeout {
+		return StallInfo{
+			Stalled:      true,
+			Level:        StallNoPeersEver,
+			Reason:       ReasonNoPeersEver,
+			InactiveSecs: int64(p.now.Sub(p.addedAt).Seconds()),
+		}
+	}
+
+	// Rule 4: fully-downloaded torrents are never stalled.
+	if p.bytesMissing <= 0 {
+		return StallInfo{}
+	}
+
+	// Rule 5: pre-metadata torrents that haven't tripped rule 3 stay not
+	// stalled — without metainfo there's no meaningful activity to measure.
+	if !p.hasInfo {
+		return StallInfo{}
+	}
+
+	// Rule 6: no recent data activity.
+	lastActivity := p.lastActivityAt
+	if lastActivity.IsZero() {
+		lastActivity = p.addedAt
+		if p.firstPeerAt != nil && p.firstPeerAt.After(lastActivity) {
+			lastActivity = *p.firstPeerAt
+		}
+	}
+	inactive := p.now.Sub(lastActivity)
+	st := StallInfo{
+		InactiveSecs: int64(inactive.Seconds()),
+		LastActivity: &lastActivity,
+	}
+	if inactive < p.stallTimeout {
+		return st
+	}
+
+	st.Stalled = true
+	switch {
+	case inactive >= 5*p.stallTimeout:
+		st.Level = StallLevel3
+	case inactive >= 2*p.stallTimeout:
+		st.Level = StallLevel2
+	default:
+		st.Level = StallLevel1
+	}
+	switch {
+	case p.activePeers == 0:
+		st.Reason = ReasonNoPeers
+	case p.connectedSeeders == 0:
+		st.Reason = ReasonNoSeeders
+	default:
+		st.Reason = ReasonNoDataReceived
+	}
+	return st
 }

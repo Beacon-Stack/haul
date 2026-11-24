@@ -19,7 +19,7 @@ import (
 	adminpkg "github.com/beacon-stack/haul/internal/db/admin"
 )
 
-// ── Schemas ───────────────────────────────────────────────────────────
+// Schemas
 
 type diagnosticSummary struct {
 	Name        string `json:"name"`
@@ -55,7 +55,7 @@ type diagnosticCleanupOutput struct {
 	Body adminpkg.CleanupResult
 }
 
-// ── Registration ──────────────────────────────────────────────────────
+// Registration
 
 // RegisterAdminDiagnosticsRoutes wires the diagnostics endpoints.
 // Caller is responsible for only invoking this when the flag is on —

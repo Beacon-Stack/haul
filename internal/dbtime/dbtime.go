@@ -3,8 +3,8 @@
 //
 // Never bind a time.Time directly as a query argument: the SQLite driver
 // stores it as time.Time.String() ("2026-11-18 17:26:54.587019257 +0000
-// UTC"), which is not RFC3339, doesn't round-trip through time.Parse with
-// RFC3339, and is what Haul used to send to Pilot and Prism.
+// UTC"), which is not RFC3339 and doesn't round-trip through time.Parse,
+// so Pilot and Prism could not read it.
 //
 // The stored format is fixed-width UTC with millisecond precision,
 // "2006-01-02T15:04:05.000Z". It is valid RFC3339 (Go's time.RFC3339 and

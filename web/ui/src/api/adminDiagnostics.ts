@@ -1,7 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "./client";
 
-// ── Types ─────────────────────────────────────────────────────────────
+// Types
 
 export interface DiagnosticSummary {
   name: string;
@@ -41,7 +41,7 @@ export interface CleanupHistoryEntry {
   actor_key_prefix: string;
 }
 
-// ── Diagnostics ───────────────────────────────────────────────────────
+// Diagnostics
 
 export function useDiagnostics() {
   return useQuery({
@@ -75,7 +75,7 @@ export function useCleanupDiagnostic() {
   });
 }
 
-// ── Cleanup history ───────────────────────────────────────────────────
+// Cleanup history
 
 export function useCleanupHistory(filter?: { diagnostic?: string; source_table?: string; limit?: number }) {
   const params = new URLSearchParams();

@@ -83,7 +83,7 @@ func TestRestoreFromDB_SkipsRemovedTorrents(t *testing.T) {
 	// One DB file shared across both session lifecycles — the restart.
 	dbPath := t.TempDir() + "/haul.db"
 
-	// ── Session #1: add two torrents, soft-delete one ──────────────────────
+	// Session #1: add two torrents, soft-delete one
 	sess1 := newTestSessionWithDB(t, dbPath)
 
 	deletedHash, _ := addTestTorrent(t, sess1, nil)
@@ -108,7 +108,7 @@ func TestRestoreFromDB_SkipsRemovedTorrents(t *testing.T) {
 	// the "restart". Cleanup will Close again (idempotent) and close the DB.
 	sess1.Close()
 
-	// ── Session #2: reopen over the SAME DB → restoreFromDB runs ───────────
+	// Session #2: reopen over the SAME DB → restoreFromDB runs
 	sess2 := newTestSessionWithDB(t, dbPath)
 
 	// Give restore's async waitAndStart goroutines a beat to register the

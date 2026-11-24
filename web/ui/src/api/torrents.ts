@@ -46,11 +46,10 @@ export interface TorrentFile {
   progress: number;
 }
 
-// ── Torrent detail types ─────────────────────────────────────────────────────
+// Torrent detail types
 //
-// These power the enhanced detail page — peer list, piece bar, tracker list.
-// See plans/haul-torrent-detail-enhancements.md for the full design. The
-// shapes here mirror internal/core/torrent/session.go one-for-one.
+// These power the detail page: peer list, piece bar, tracker list. The
+// shapes mirror internal/core/torrent/session.go one-for-one.
 
 export interface PeerInfo {
   addr: string;          // "1.2.3.4:54321"
@@ -127,7 +126,7 @@ export function useTorrentFiles(hash: string) {
   });
 }
 
-// ── Detail-page hooks ────────────────────────────────────────────────────────
+// Detail-page hooks
 // All three poll at the detail-page cadence (1s) except trackers, which is
 // static data from the metainfo — refetch rarely.
 
@@ -261,7 +260,7 @@ export function useSetTorrentPriority() {
   });
 }
 
-// ── Right-click context-menu actions ─────────────────────────────────────────
+// Right-click context-menu actions
 //
 // Backend wiring lives in internal/api/v1/torrent_control.go; these
 // hooks just exist so the menu can call them through the same react-

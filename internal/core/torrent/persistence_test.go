@@ -60,7 +60,7 @@ func TestPieceCompletionSurvivesRestart(t *testing.T) {
 	dataDir := t.TempDir()
 	downloadDir := t.TempDir()
 
-	// ── 1. Build payload + metainfo ─────────────────────────────────────────
+	// 1. Build payload + metainfo
 	seederRoot := t.TempDir()
 	const fileName = "resume-payload.bin"
 	const fileSize = 256 * 1024 // 256 KiB
@@ -86,7 +86,7 @@ func TestPieceCompletionSurvivesRestart(t *testing.T) {
 		t.Fatalf("encode metainfo: %v", err)
 	}
 
-	// ── 2. Start seeder ─────────────────────────────────────────────────────
+	// 2. Start seeder
 	seederCfg := lt.NewDefaultClientConfig()
 	seederCfg.DataDir = seederRoot
 	seederCfg.ListenPort = 0
@@ -108,7 +108,7 @@ func TestPieceCompletionSurvivesRestart(t *testing.T) {
 	_ = seederT.VerifyDataContext(context.Background())
 	seederAddrs := seeder.ListenAddrs()
 
-	// ── 3. Session #1: download the payload to completion ──────────────────
+	// 3. Session #1: download the payload to completion
 	cfg := config.TorrentConfig{
 		ListenPort:  0,
 		DownloadDir: downloadDir,
@@ -158,7 +158,7 @@ func TestPieceCompletionSurvivesRestart(t *testing.T) {
 		t.Fatalf("session #1 download incomplete: got %d / %d", mt1.t.BytesCompleted(), fileSize)
 	}
 
-	// ── 4. Close session #1. The bolt completion store must flush to disk
+	// 4. Close session #1. The bolt completion store must flush to disk
 	//    before Close returns, otherwise session #2 won't see the pieces.
 	sess1.Close()
 
@@ -170,7 +170,7 @@ func TestPieceCompletionSurvivesRestart(t *testing.T) {
 			"the NewBoltPieceCompletion wiring in NewSession was skipped", boltPath, err)
 	}
 
-	// ── 5. Session #2: re-add the SAME torrent with the SAME data dir ──────
+	// 5. Session #2: re-add the SAME torrent with the SAME data dir
 	sess2, err := NewSession(cfg, noDB, events.New(logger), logger)
 	if err != nil {
 		t.Fatalf("session #2: %v", err)

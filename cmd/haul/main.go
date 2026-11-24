@@ -55,14 +55,14 @@ func main() {
 	flag.Parse()
 	startTime := time.Now()
 
-	// ── Config ────────────────────────────────────────────────────────────
+	// Config
 	cfg, err := config.Load(*cfgFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// ── Logger ────────────────────────────────────────────────────────────
+	// Logger
 	// Shared module from pulse/pkg/log — gives us stdout JSON, a ring
 	// buffer behind /api/v1/system/logs, and pluggable sinks (Loki,
 	// file, etc.) via env vars. Stdout is always on; plugins are
@@ -107,7 +107,7 @@ func main() {
 		"port", cfg.Server.Port,
 	)
 
-	// ── API Key ───────────────────────────────────────────────────────────
+	// API Key
 	generated, err := config.EnsureAPIKey(cfg)
 	if err != nil {
 		logger.Error("failed to generate API key", "error", err)
@@ -119,7 +119,7 @@ func main() {
 		)
 	}
 
-	// ── Database ──────────────────────────────────────────────────────────
+	// Database
 	database, err := db.Open(cfg.Database)
 	if err != nil {
 		logger.Error("database connection failed", "error", err)
@@ -137,20 +137,20 @@ func main() {
 	}
 	logger.Info("database migrations up to date")
 
-	// ── Event bus ─────────────────────────────────────────────────────────
+	// Event bus
 	bus := events.New(logger)
 
-	// ── WebSocket hub ─────────────────────────────────────────────────────
+	// WebSocket hub
 	wsHub := ws.NewHub(logger)
 	bus.Subscribe(wsHub.HandleEvent)
 
-	// ── Activity history persister ────────────────────────────────────────
+	// Activity history persister
 	// Writes lifecycle events to torrent_events so the Activity page can
 	// render history that survives restarts. Filters noisy types
 	// internally; safe to subscribe even when the DB is offline.
 	bus.Subscribe(activity.NewPersister(database.SQL, logger).HandleEvent)
 
-	// ── Torrent session ───────────────────────────────────────────────────
+	// Torrent session
 	session, err := torrent.NewSession(cfg.Torrent, database.SQL, bus, logger)
 	if err != nil {
 		logger.Error("torrent session failed", "error", err)
@@ -173,7 +173,7 @@ func main() {
 		}
 	}
 
-	// ── Pulse integration ─────────────────────────────────────────────────
+	// Pulse integration
 	// Registers with Pulse using retry/backoff (~2 minutes). If Pulse is
 	// unreachable, Haul continues in standalone mode. The service API key
 	// is sent during registration so Pilot/Prism can discover and
@@ -186,11 +186,11 @@ func main() {
 		defer pulseIntegration.Close()
 	}
 
-	// ── Services ──────────────────────────────────────────────────────────
+	// Services
 	categorySvc := category.NewService(database.SQL)
 	tagSvc := tag.NewService(database.SQL)
 
-	// ── Notifications ─────────────────────────────────────────────────────
+	// Notifications
 	// Through Pulse when connected to one that has channels, otherwise from
 	// Haul's own channels (pulse/pkg/notify). Config-file webhooks are
 	// brought over as channels once.
@@ -210,16 +210,15 @@ func main() {
 	go notifyOutbox.Run(context.Background())
 	go (&notify.HealthWatcher{Outbox: notifyOutbox, Check: notifications.HealthCheck(session.GetHealth)}).Run(context.Background())
 
-	// ── Removed: external command hooks ───────────────────────────────────
-	// Haul used to run on_add_command / on_complete_command through a
-	// shell, pasting the torrent name into the command text, so a crafted
-	// torrent name could run commands inside Haul. Notifications replace
-	// them; say so plainly if a config still sets them.
+	// on_add_command and on_complete_command are not supported: running
+	// a shell command built from a torrent's name would let a crafted
+	// name run commands inside Haul. Notifications do that job. Warn if
+	// a config still sets them.
 	if cfg.Torrent.OnAddCommand != "" || cfg.Torrent.OnCompleteCommand != "" {
 		logger.Warn("on_add_command and on_complete_command are no longer supported and are ignored; use notifications instead (Settings → Notifications, or Pulse)")
 	}
 
-	// ── VPN check (non-blocking — IP lookup can be slow in containers) ───
+	// VPN check (non-blocking — IP lookup can be slow in containers)
 	go func() {
 		torrent.CheckVPN()
 		vpnActive, vpnIface, extIP := torrent.GetVPNStatus()
@@ -230,7 +229,7 @@ func main() {
 		}
 	}()
 
-	// ── Background checkers ──────────────────────────────────────────────
+	// Background checkers
 	go func() {
 		seedTicker := time.NewTicker(60 * time.Second)
 		stallTicker := time.NewTicker(30 * time.Second)
@@ -258,7 +257,7 @@ func main() {
 		}
 	}()
 
-	// ── Admin diagnostics (gated by HAUL_ADMIN_DIAGNOSTICS_ENABLED) ───────
+	// Admin diagnostics (gated by HAUL_ADMIN_DIAGNOSTICS_ENABLED)
 	// Off by default; operators flip it on in .env when they need to
 	// inspect/clean orphan DB rows. When off the router skips registering
 	// the routes entirely (404 on every /api/v1/admin/* path).
@@ -297,7 +296,7 @@ func main() {
 		)
 	}
 
-	// ── HTTP router ───────────────────────────────────────────────────────
+	// HTTP router
 	router := api.NewRouter(api.RouterConfig{
 		StartTime:    startTime,
 		DBPath:       cfg.Database.Path,
@@ -330,7 +329,7 @@ func main() {
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// ── Start ─────────────────────────────────────────────────────────────
+	// Start
 	go func() {
 		logger.Info("HTTP server listening", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -339,7 +338,7 @@ func main() {
 		}
 	}()
 
-	// ── Graceful shutdown ─────────────────────────────────────────────────
+	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	sig := <-quit

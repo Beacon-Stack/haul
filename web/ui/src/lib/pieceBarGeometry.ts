@@ -1,12 +1,7 @@
 // Pure functions that back the PieceBar canvas widget. Everything here is
 // DOM-free so the canvas component stays focused on drawing, not math.
 //
-// These functions are unit-testable in isolation; Haul doesn't currently
-// have a frontend test runner wired up, so verification happens via smoke
-// test against a real torrent. If a regression is ever suspected, install
-// vitest in haul/web/ui and drop in a test file alongside this one.
-//
-// See plans/haul-torrent-detail-enhancements.md §4 for the full design.
+// These functions are pure, so they can be unit-tested in isolation.
 
 import type { PieceStateRun, TorrentFile } from "@/api/torrents";
 
