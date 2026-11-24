@@ -139,6 +139,20 @@ Severity escalates with inactivity: level 1 at `stall_timeout`, level 2 at 2x, l
 
 **API surface.** The REST API is complete — anything the UI does is available over HTTP. Interactive docs at `/api/docs`.
 
+## Access and login
+
+By default Haul needs no login: devices on your local network get in, and connections from anywhere else are refused. You can change that in Settings → Security:
+
+- **None** (default): the local network only, no login.
+- **Login, except on my local network**: anyone outside it needs the username and password.
+- **Login for everyone**.
+
+"Local" means the private address ranges (192.168.x.x, 10.x.x.x, 172.16–31.x.x). If your network uses other addresses, or Haul sees a different address for your devices (some VPNs and container setups), add the range in the same place or set `HAUL_AUTH_LOCAL_NETWORKS` (comma-separated). The settings page shows the address Haul sees for you.
+
+No login is only safe while Haul can't be reached from the internet. If you forward a port or publish it through a proxy, choose a login.
+
+Scripts and the other Beacon apps use the API key, which works whichever option is chosen. If you open Haul through your own domain name without a login, list the name in `HAUL_SERVER_ALLOWED_HOSTS`.
+
 ## Privacy
 
 Haul collects nothing: no telemetry, no analytics, no crash reporting. It connects to:

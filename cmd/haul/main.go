@@ -8,8 +8,11 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/beacon-stack/pulse/pkg/auth"
 
 	"github.com/beacon-stack/haul/internal/api"
 	"github.com/beacon-stack/haul/internal/api/ws"
@@ -107,16 +110,40 @@ func main() {
 		"port", cfg.Server.Port,
 	)
 
-	// API Key
-	generated, err := config.EnsureAPIKey(cfg)
+	// API key: from the config or environment, else one kept in a file
+	// beside the database, so it (and every login session, which is signed
+	// with it) survives a restart.
+	dataDir := filepath.Dir(cfg.Database.Path)
+	if cfg.Auth.APIKey.IsEmpty() {
+		key, created, err := auth.LoadOrCreateKey(filepath.Join(dataDir, "api_key"))
+		if err != nil {
+			logger.Error("failed to load or create the API key", "error", err)
+			os.Exit(1)
+		}
+		cfg.Auth.APIKey = config.Secret(key)
+		if created {
+			logger.Info("created an API key", "file", filepath.Join(dataDir, "api_key"))
+		}
+	}
+
+	// Who may use the app. Settings live in auth.json beside the database.
+	gate, err := auth.Open(auth.Options{
+		App:           "Haul",
+		APIKey:        cfg.Auth.APIKey.Value(),
+		AllowedHosts:  auth.ListFromEnv("HAUL_SERVER_ALLOWED_HOSTS"),
+		LocalNetworks: auth.ListFromEnv("HAUL_AUTH_LOCAL_NETWORKS"),
+	}, dataDir, auth.Settings{})
 	if err != nil {
-		logger.Error("failed to generate API key", "error", err)
+		logger.Error("failed to load login settings", "error", err)
 		os.Exit(1)
 	}
-	if generated {
-		logger.Warn("generated API key — save this, it won't be shown again",
-			"api_key", cfg.Auth.APIKey.Value(),
-		)
+	switch gate.Settings().Mode() {
+	case auth.RequiredEverywhere:
+		logger.Info("a login is required from every address")
+	case auth.RequiredOutside:
+		logger.Info("the local network needs no login; other addresses log in")
+	default:
+		logger.Info("no login: the local network gets in, other addresses are refused")
 	}
 
 	// Database
@@ -298,6 +325,7 @@ func main() {
 
 	// HTTP router
 	router := api.NewRouter(api.RouterConfig{
+		Gate:         gate,
 		StartTime:    startTime,
 		DBPath:       cfg.Database.Path,
 		Logger:       logger,

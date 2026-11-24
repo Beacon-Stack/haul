@@ -6,7 +6,7 @@ require (
 	github.com/anacrolix/dht/v2 v2.23.0
 	github.com/anacrolix/publicip v0.3.1
 	github.com/anacrolix/torrent v1.61.1-0.20260424074716-b441f1511478
-	github.com/beacon-stack/pulse v0.4.1-0.20261123132244-9e34931ecae8
+	github.com/beacon-stack/pulse v0.4.1-0.20261124200048-a82e43abd90b
 	github.com/coder/websocket v1.8.14
 	github.com/danielgtaylor/huma/v2 v2.37.3
 	github.com/fsnotify/fsnotify v1.9.0
