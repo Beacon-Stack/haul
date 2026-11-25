@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import "./fonts";
 import App from "./App";
 import "./index.css";
 import { installAuthRedirect } from "@beacon-shared/auth";
