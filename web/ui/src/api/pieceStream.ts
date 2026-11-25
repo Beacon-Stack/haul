@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 // One batch from the server's live piece stream.
 export interface PieceUpdate {
-  done?: number[];                        // pieces that just finished, in order
+  done?: number[];                        // pieces that just finished
   progress?: { i: number; f: number }[];  // in-progress pieces: index and fraction downloaded
 }
 

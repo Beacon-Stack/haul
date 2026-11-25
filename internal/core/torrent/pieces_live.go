@@ -4,14 +4,12 @@ import (
 	"context"
 	"fmt"
 	"sort"
-	"sync"
 	"time"
 )
 
 // PieceUpdate is one batch of changes for a torrent's live piece view.
 type PieceUpdate struct {
-	// Done lists pieces that finished since the last update, in the order
-	// they finished.
+	// Done lists pieces that finished since the last update.
 	Done []int `json:"done,omitempty"`
 	// Progress gives how much of each in-progress piece has arrived. A
 	// piece is listed only when its fraction changed.
@@ -25,9 +23,11 @@ type PieceProgress struct {
 }
 
 const (
-	// pieceFlushInterval batches finished pieces: short enough that a
-	// piece appears to land the moment it finishes, long enough that a
-	// fast download sends a dozen messages a second rather than hundreds.
+	// pieceFlushInterval is how often the piece states are read: short
+	// enough that a piece appears to land the moment it finishes, long
+	// enough that a fast download sends a dozen messages a second rather
+	// than hundreds. The states are read directly: it is one cheap call,
+	// and simpler than following the library's per-piece change notices.
 	pieceFlushInterval = 80 * time.Millisecond
 	// pieceProgressEvery is how many flushes pass between progress
 	// readings (about four a second).
@@ -35,60 +35,62 @@ const (
 	pieceReadyPoll     = 500 * time.Millisecond
 )
 
-// pieceBatcher collects piece state changes between flushes.
-type pieceBatcher struct {
-	mu      sync.Mutex
-	done    []int
-	partial map[int]float64 // in-progress piece → fraction last reported (-1: none yet)
+// pieceTracker compares successive readings of a torrent's piece states
+// and reports what changed.
+type pieceTracker struct {
+	complete map[int]struct{}
+	active   map[int]float64 // in-progress piece → fraction last reported
+	primed   bool
 }
 
-func newPieceBatcher() *pieceBatcher {
-	return &pieceBatcher{partial: make(map[int]float64)}
+func newPieceTracker() *pieceTracker {
+	return &pieceTracker{complete: make(map[int]struct{}), active: make(map[int]float64)}
 }
 
-// observe records a piece's new state ("complete", "partial", "checking"
-// or "missing", as classifyPieceState names them).
-func (b *pieceBatcher) observe(index int, state string) {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	switch state {
-	case "complete":
-		delete(b.partial, index)
-		b.done = append(b.done, index)
-	case "partial":
-		if _, ok := b.partial[index]; !ok {
-			b.partial[index] = -1
+// update takes the current piece states and returns the pieces that
+// finished since the last call, lowest index first. With withProgress it
+// also returns the fill level of in-progress pieces whose level changed.
+// The first call only records what is already there: pieces that finished
+// before watching began are not announced.
+func (p *pieceTracker) update(runs []PieceStateRun, fraction func(index int) float64, withProgress bool) PieceUpdate {
+	var out PieceUpdate
+	complete := make(map[int]struct{}, len(p.complete))
+	active := make(map[int]float64, len(p.active))
+
+	index := 0
+	for _, run := range runs {
+		switch run.State {
+		case "complete":
+			for i := index; i < index+run.Length; i++ {
+				complete[i] = struct{}{}
+				if _, had := p.complete[i]; !had && p.primed {
+					out.Done = append(out.Done, i)
+				}
+			}
+		case "partial", "checking":
+			for i := index; i < index+run.Length; i++ {
+				last, seen := p.active[i]
+				if !seen {
+					last = -1
+				}
+				active[i] = last
+			}
 		}
-	case "missing":
-		// A piece that failed its hash check goes back to missing.
-		delete(b.partial, index)
+		index += run.Length
 	}
-}
+	p.complete, p.active, p.primed = complete, active, true
 
-// takeDone returns the pieces finished since the last call.
-func (b *pieceBatcher) takeDone() []int {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	out := b.done
-	b.done = nil
-	return out
-}
-
-// takeProgress reads each in-progress piece's fraction and returns the
-// ones that changed since they were last reported.
-func (b *pieceBatcher) takeProgress(fraction func(index int) float64) []PieceProgress {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	var out []PieceProgress
-	for index, last := range b.partial {
-		f := fraction(index)
-		if f == last {
-			continue
+	if withProgress {
+		for i, last := range p.active {
+			f := fraction(i)
+			if f == last {
+				continue
+			}
+			p.active[i] = f
+			out.Progress = append(out.Progress, PieceProgress{Index: i, Fraction: f})
 		}
-		b.partial[index] = f
-		out = append(out, PieceProgress{Index: index, Fraction: f})
+		sort.Slice(out.Progress, func(a, b int) bool { return out.Progress[a].Index < out.Progress[b].Index })
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Index < out[j].Index })
 	return out
 }
 
@@ -110,29 +112,15 @@ func (s *Session) WatchPieces(ctx context.Context, hash string, send func(PieceU
 		}
 	}
 
-	batch := newPieceBatcher()
-
-	// Subscribe before reading the current state so no change is missed.
-	sub := mt.t.SubscribePieceStateChanges()
-	defer sub.Close()
-	index := 0
-	for _, run := range mt.t.PieceStateRuns() {
-		if classifyPieceState(run.PieceState) == "partial" {
-			for i := 0; i < run.Length; i++ {
-				batch.observe(index+i, "partial")
-			}
+	tracker := newPieceTracker()
+	states := func() []PieceStateRun {
+		runs := mt.t.PieceStateRuns()
+		out := make([]PieceStateRun, len(runs))
+		for i, r := range runs {
+			out[i] = PieceStateRun{Length: r.Length, State: classifyPieceState(r.PieceState)}
 		}
-		index += run.Length
+		return out
 	}
-
-	// The subscription queues without limit, so it is drained on its own
-	// goroutine and never waits on a slow client.
-	go func() {
-		for change := range sub.Values {
-			batch.observe(change.Index, classifyPieceState(change.PieceState))
-		}
-	}()
-
 	fraction := func(i int) float64 {
 		length := mt.t.Piece(i).Info().Length()
 		if length <= 0 {
@@ -140,6 +128,8 @@ func (s *Session) WatchPieces(ctx context.Context, hash string, send func(PieceU
 		}
 		return 1 - float64(mt.t.PieceBytesMissing(i))/float64(length)
 	}
+
+	tracker.update(states(), fraction, false)
 
 	ticker := time.NewTicker(pieceFlushInterval)
 	defer ticker.Stop()
@@ -151,10 +141,7 @@ func (s *Session) WatchPieces(ctx context.Context, hash string, send func(PieceU
 			return nil
 		case <-ticker.C:
 		}
-		update := PieceUpdate{Done: batch.takeDone()}
-		if tick%pieceProgressEvery == 0 {
-			update.Progress = batch.takeProgress(fraction)
-		}
+		update := tracker.update(states(), fraction, tick%pieceProgressEvery == 0)
 		if len(update.Done) == 0 && len(update.Progress) == 0 {
 			continue
 		}
