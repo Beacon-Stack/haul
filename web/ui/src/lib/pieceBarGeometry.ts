@@ -1,15 +1,7 @@
-// Pure functions that back the PieceBar canvas widget. Everything here is
-// DOM-free so the canvas component stays focused on drawing, not math.
-//
-// These functions are pure, so they can be unit-tested in isolation.
+// Pure functions that back the PieceBar canvas widget: where pieces and
+// files sit on the bar. DOM-free, so they can be unit-tested in isolation.
 
 import type { PieceStateRun, TorrentFile } from "@/api/torrents";
-
-export interface BarColumn {
-  fracComplete: number; // 0..1 — weighted completion of pieces mapped to this column
-  hasPartial: boolean;  // any piece in this column is currently being downloaded
-  hasChecking: boolean; // any piece in this column is being verified/hashed
-}
 
 export interface FileSegment {
   xStart: number; // inclusive pixel x
@@ -18,45 +10,52 @@ export interface FileSegment {
   size: number;   // bytes
 }
 
-// runsToColumns walks the run-length-encoded piece state and builds a
-// fixed-width array of per-pixel columns. Each column aggregates the state
-// of the pieces whose index maps to that x-coordinate via
-//   x = floor((pieceIndex / numPieces) * width)
-//
-// Complexity: O(numPieces + width). For a 10k-piece torrent at 800px this
-// is ~20μs — negligible even at 1 Hz poll + 60 Hz redraw.
-export function runsToColumns(
-  runs: PieceStateRun[],
-  numPieces: number,
-  width: number,
-): BarColumn[] {
-  const cols: BarColumn[] = Array.from({ length: width }, () => ({
-    fracComplete: 0,
-    hasPartial: false,
-    hasChecking: false,
-  }));
-  if (numPieces <= 0 || width <= 0) return cols;
+// Piece states as the bar stores them, one byte per piece.
+export const MISSING = 0;
+export const PARTIAL = 1;
+export const COMPLETE = 2;
+export const CHECKING = 3;
 
-  // Use typed arrays for the count accumulators — avoids GC pressure at
-  // high poll rates with large torrents.
-  const totals = new Int32Array(width);
-  const completes = new Int32Array(width);
-
-  let globalIdx = 0;
+// expandRuns turns the run-length-encoded piece states into one state per
+// piece. Pieces the runs don't cover stay MISSING.
+export function expandRuns(runs: PieceStateRun[], numPieces: number): Uint8Array {
+  const out = new Uint8Array(Math.max(0, numPieces));
+  let idx = 0;
   for (const run of runs) {
-    for (let i = 0; i < run.length; i++) {
-      const x = Math.min(Math.floor((globalIdx / numPieces) * width), width - 1);
-      totals[x]++;
-      if (run.state === "complete") completes[x]++;
-      else if (run.state === "partial") cols[x].hasPartial = true;
-      else if (run.state === "checking") cols[x].hasChecking = true;
-      globalIdx++;
-    }
+    const state =
+      run.state === "complete" ? COMPLETE
+      : run.state === "partial" ? PARTIAL
+      : run.state === "checking" ? CHECKING
+      : MISSING;
+    const end = Math.min(idx + run.length, out.length);
+    if (state !== MISSING) out.fill(state, idx, end);
+    idx += run.length;
   }
-  for (let x = 0; x < width; x++) {
-    cols[x].fracComplete = totals[x] === 0 ? 0 : completes[x] / totals[x];
-  }
-  return cols;
+  return out;
+}
+
+// The bar is divided into cells. With fewer pieces than pixels each piece
+// gets its own cell, wider than a pixel; with more, a cell is one pixel
+// and holds several pieces. Position is preserved either way: a piece
+// from the middle of the torrent sits in the middle of the bar.
+export function cellCount(numPieces: number, width: number): number {
+  return Math.max(0, Math.min(numPieces, Math.floor(width)));
+}
+
+export function cellOfPiece(index: number, numPieces: number, cells: number): number {
+  if (numPieces <= 0 || cells <= 0) return 0;
+  // Multiply before dividing: whole numbers stay exact, so this always
+  // agrees with cellPieceRange.
+  return Math.min(cells - 1, Math.floor((index * cells) / numPieces));
+}
+
+// cellPieceRange returns the pieces [start, end) that cellOfPiece maps to
+// the given cell.
+export function cellPieceRange(cell: number, numPieces: number, cells: number): [number, number] {
+  if (numPieces <= 0 || cells <= 0) return [0, 0];
+  const start = Math.ceil((cell * numPieces) / cells);
+  const end = cell >= cells - 1 ? numPieces : Math.ceil(((cell + 1) * numPieces) / cells);
+  return [start, end];
 }
 
 // computeFileSegments maps each file in the torrent to an inclusive/exclusive
@@ -105,56 +104,4 @@ export function findSegmentAt(segments: FileSegment[], x: number): FileSegment |
     if (x >= s.xStart && x < s.xEnd) return s;
   }
   return undefined;
-}
-
-// diffNewCompletions walks previous and current RLE runs and returns the
-// indices of pieces that transitioned from not-complete to complete.
-// Used to generate the per-piece arrival flash animations — see §4.5 in
-// the plan for why this is the "assembling from parts" signal.
-//
-// The intensity-control cutoff (§D5) is applied by the caller, not here —
-// this function always returns the full diff.
-export function diffNewCompletions(
-  prev: PieceStateRun[] | undefined,
-  curr: PieceStateRun[],
-  numPieces: number,
-): number[] {
-  if (!prev || numPieces <= 0) return [];
-
-  const prevComplete = runsToCompleteSet(prev, numPieces);
-  const newlyComplete: number[] = [];
-  let idx = 0;
-  for (const run of curr) {
-    if (run.state === "complete") {
-      for (let i = 0; i < run.length; i++) {
-        if (!prevComplete.has(idx + i)) newlyComplete.push(idx + i);
-      }
-    }
-    idx += run.length;
-  }
-  return newlyComplete;
-}
-
-// runsToCompleteSet expands a run-length run list into a set of piece indices
-// that are in the 'complete' state. Internal helper for diffNewCompletions.
-function runsToCompleteSet(runs: PieceStateRun[], numPieces: number): Set<number> {
-  const set = new Set<number>();
-  let idx = 0;
-  for (const run of runs) {
-    if (run.state === "complete") {
-      for (let i = 0; i < run.length; i++) {
-        if (idx + i < numPieces) set.add(idx + i);
-      }
-    }
-    idx += run.length;
-  }
-  return set;
-}
-
-// pieceIndexToX maps a piece index to its pixel x-coordinate using the same
-// formula as runsToColumns. Used by the arrival-flash renderer to place
-// individual pieces on the canvas.
-export function pieceIndexToX(index: number, numPieces: number, width: number): number {
-  if (numPieces <= 0) return 0;
-  return Math.min(Math.floor((index / numPieces) * width), width - 1);
 }

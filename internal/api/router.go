@@ -115,6 +115,9 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		protected.Get("/api/v1/ws", cfg.WSHub.ServeHTTP)
 	}
 
+	// Live piece stream for one torrent's detail page.
+	protected.Get("/api/v1/torrents/{hash}/pieces/live", ws.PiecesHandler(cfg.Session.WatchPieces, cfg.Logger))
+
 	// .torrent file export. Registered as a chi route because Huma
 	// shapes responses as JSON; we want to stream raw BYTEA bytes with
 	// a Content-Disposition header so a browser fetch can save-as.

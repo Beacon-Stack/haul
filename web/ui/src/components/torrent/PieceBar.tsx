@@ -1,83 +1,56 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PiecesInfo, TorrentFile } from "@/api/torrents";
+import { usePieceStream } from "@/api/pieceStream";
 import { formatBytes } from "@/lib/format";
-import {
-  runsToColumns,
-  computeFileSegments,
-  findSegmentAt,
-  diffNewCompletions,
-  pieceIndexToX,
-  type BarColumn,
-  type FileSegment,
-} from "@/lib/pieceBarGeometry";
+import { usePieceAnimation } from "@/lib/displayPrefs";
+import { computeFileSegments, findSegmentAt, type FileSegment } from "@/lib/pieceBarGeometry";
+import { PieceBarEngine, type BarColors } from "./pieceBarEngine";
 
-// PieceBar — canvas-rendered torrent piece visualization with per-piece
-// arrival animation, file hover, and auto-stopping rAF loop.
+// PieceBar shows a torrent being assembled: one position per piece, each
+// piece dropping into place the moment it finishes. The drawing and
+// motion live in PieceBarEngine; this component feeds it the piece
+// snapshots, the live stream, the bar's width and the theme, and handles
+// the file hover.
 //
-// Key properties:
-//  - Single pixel column per piece (adaptive via runsToColumns when more
-//    pieces than pixels). Spatial position is preserved — a piece from the
-//    middle of the file lights up in the middle of the bar.
-//  - Three layers per draw: base completion bar → partial-piece shimmer
-//    (sine-wave alpha) → one-shot arrival flashes (fade over 400ms).
-//  - File hover: DOM tooltip positioned from pointer, not a canvas-drawn
-//    overlay, so the text gets native CSS styling and antialiasing.
-//  - rAF loop stops itself whenever nothing is animating (idle CPU = 0%).
-//  - prefers-reduced-motion kills the shimmer and flashes entirely.
-//  - Intensity control: if >50 pieces completed in a single poll, skip
-//    flash generation — at that rate the bar's colour update alone conveys
-//    rapid progress and individual flashes would look busy.
+// The animation can be turned off in Settings, and is off for anyone
+// whose system asks for reduced motion. Either way the bar is then a
+// plain strip that fills in.
 
 interface PieceBarProps {
+  hash: string;
   pieces: PiecesInfo;
   files: TorrentFile[];
-  progress: number; // 0..1 — used to auto-collapse section when done
+  progress: number; // 0..1
 }
 
-const BAR_HEIGHT = 22;
-const FLASH_DURATION_MS = 400;
-const FLASH_INTENSITY_CUTOFF = 50;
-
-interface ArrivalFlash {
-  x: number;
-  start: number;
-}
-
-// ThemeColors are read once at mount via getComputedStyle — canvas needs
-// concrete hex, not CSS vars. See plan §4.7.
-interface ThemeColors {
-  downloading: string;
-  warning: string;
-  bgSubtle: string;
-  divider: string;
-  flash: string;
-}
-
-function useThemeColors(): ThemeColors {
+// Canvas needs concrete colours, not CSS variables, so they are read from
+// the theme once at mount.
+function useThemeColors(): BarColors {
   return useMemo(() => {
     const s = getComputedStyle(document.documentElement);
-    const get = (name: string, fallback: string) => {
-      const v = s.getPropertyValue(name).trim();
-      return v || fallback;
-    };
-    const downloading = get("--color-status-downloading", "#3b9eff");
+    const get = (name: string, fallback: string) => s.getPropertyValue(name).trim() || fallback;
     return {
-      downloading,
+      downloading: get("--color-status-downloading", "#3b9eff"),
+      success: get("--color-success", "#34d399"),
       warning: get("--color-warning", "#fbbf24"),
-      bgSubtle: get("--color-bg-subtle", "#2a2a35"),
+      well: get("--color-bg-subtle", "#2a2a35"),
       divider: get("--color-border-subtle", "#3a3a4a"),
-      // Flash is a brighter cousin of the downloading colour — we bias
-      // toward near-white so it pops against the base bar.
-      flash: "#d0e8ff",
     };
   }, []);
 }
 
-export default function PieceBar({ pieces, files, progress }: PieceBarProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const colors = useThemeColors();
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
 
-  // Observe canvas parent width so the bar adapts to layout changes.
+export default function PieceBar({ hash, pieces, files, progress }: PieceBarProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const engineRef = useRef<PieceBarEngine | null>(null);
+  const colors = useThemeColors();
+  const animate = usePieceAnimation() && !prefersReducedMotion();
+  const waiting = pieces.num_pieces === 0;
+
+  // Follow the wrapper's width so the bar adapts to layout changes.
   const [width, setWidth] = useState(800);
   const wrapperRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -93,147 +66,40 @@ export default function PieceBar({ pieces, files, progress }: PieceBarProps) {
     return () => ro.disconnect();
   }, []);
 
-  // Track previous runs so we can diff newly-complete pieces into arrival
-  // flashes. The ref is intentionally kept outside React state — we don't
-  // want to trigger re-renders just to update the diff source.
-  const prevRunsRef = useRef<PiecesInfo["runs"] | undefined>(undefined);
-  const flashesRef = useRef<ArrivalFlash[]>([]);
+  const segments = useMemo<FileSegment[]>(() => computeFileSegments(files, width), [files, width]);
 
-  // Columns and file segments are derived from the incoming pieces/files
-  // snapshot and the observed canvas width. Recomputed every poll + every
-  // resize, which is cheap (O(numPieces + width)).
-  const columns = useMemo<BarColumn[]>(() => {
-    return runsToColumns(pieces.runs, pieces.num_pieces, width);
-  }, [pieces.runs, pieces.num_pieces, width]);
-
-  const segments = useMemo<FileSegment[]>(() => {
-    return computeFileSegments(files, width);
-  }, [files, width]);
-
-  // Diff previous-vs-current runs whenever a new snapshot arrives. This
-  // generates the arrival-flash queue the rAF loop will draw.
+  // The canvas exists only once the torrent has metadata. These effects
+  // run in order, so the engine is sized before it gets its first pieces.
   useEffect(() => {
-    const newly = diffNewCompletions(prevRunsRef.current, pieces.runs, pieces.num_pieces);
-    prevRunsRef.current = pieces.runs;
-
-    if (newly.length === 0 || newly.length > FLASH_INTENSITY_CUTOFF) return;
-
-    const now = performance.now();
-    const newFlashes = newly.map((idx) => ({
-      x: pieceIndexToX(idx, pieces.num_pieces, width),
-      start: now,
-    }));
-    flashesRef.current = [...flashesRef.current, ...newFlashes];
-  }, [pieces.runs, pieces.num_pieces, width]);
-
-  // Main rAF render loop. Runs whenever there's something to animate —
-  // shimmer (hasPartial in any column) or unresolved flashes. Stops itself
-  // when idle so completed torrents don't waste CPU.
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(BAR_HEIGHT * dpr);
-    canvas.style.width = `${width}px`;
-    canvas.style.height = `${BAR_HEIGHT}px`;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-    let rafId: number | null = null;
-    let running = true;
-
-    const hasPartial = columns.some((c) => c.hasPartial);
-
-    const draw = (now: number) => {
-      if (!running) return;
-
-      // Background wash.
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = colors.bgSubtle;
-      ctx.fillRect(0, 0, width, BAR_HEIGHT);
-
-      // Base completion layer. Missing columns are already painted by the
-      // wash; we draw only where we have something to show.
-      for (let x = 0; x < columns.length; x++) {
-        const col = columns[x];
-        if (col.hasChecking) {
-          ctx.globalAlpha = 1;
-          ctx.fillStyle = colors.warning;
-          ctx.fillRect(x, 0, 1, BAR_HEIGHT);
-          continue;
-        }
-        if (col.fracComplete <= 0) continue;
-        ctx.globalAlpha = col.fracComplete;
-        ctx.fillStyle = colors.downloading;
-        ctx.fillRect(x, 0, 1, BAR_HEIGHT);
-      }
-      ctx.globalAlpha = 1;
-
-      // Partial-piece shimmer — low-intensity sine wave pulsing by clock
-      // time. Skipped entirely under prefers-reduced-motion.
-      if (!reducedMotion && hasPartial) {
-        const shimmer = 0.45 + 0.25 * Math.sin((now / 600) * Math.PI);
-        ctx.globalAlpha = shimmer;
-        ctx.fillStyle = colors.downloading;
-        for (let x = 0; x < columns.length; x++) {
-          if (columns[x].hasPartial) ctx.fillRect(x, 0, 1, BAR_HEIGHT);
-        }
-        ctx.globalAlpha = 1;
-      }
-
-      // Arrival flashes — fade out over FLASH_DURATION_MS, then drop from
-      // the queue. Skipped entirely under prefers-reduced-motion.
-      if (!reducedMotion) {
-        const stillActive: ArrivalFlash[] = [];
-        for (const f of flashesRef.current) {
-          const age = now - f.start;
-          if (age >= FLASH_DURATION_MS) continue;
-          stillActive.push(f);
-          const t = age / FLASH_DURATION_MS;
-          ctx.globalAlpha = 1 - t;
-          ctx.fillStyle = colors.flash;
-          // 2px wide so the flash is visible even at sub-pixel positions.
-          ctx.fillRect(Math.max(0, f.x - 0.5), 0, 2, BAR_HEIGHT);
-        }
-        flashesRef.current = stillActive;
-        ctx.globalAlpha = 1;
-      } else {
-        // Reduced motion: drop the queue so we don't accumulate.
-        flashesRef.current = [];
-      }
-
-      // File boundary dividers (multi-file only).
-      if (segments.length > 1) {
-        ctx.fillStyle = colors.divider;
-        ctx.globalAlpha = 0.7;
-        for (let i = 1; i < segments.length; i++) {
-          ctx.fillRect(segments[i].xStart, 0, 1, BAR_HEIGHT);
-        }
-        ctx.globalAlpha = 1;
-      }
-
-      const needsAnotherFrame =
-        !reducedMotion && (hasPartial || flashesRef.current.length > 0);
-      if (needsAnotherFrame) {
-        rafId = requestAnimationFrame(draw);
-      } else {
-        rafId = null;
-      }
-    };
-
-    rafId = requestAnimationFrame(draw);
-
+    if (waiting || !canvasRef.current) return;
+    const engine = new PieceBarEngine(canvasRef.current, colors);
+    engineRef.current = engine;
     return () => {
-      running = false;
-      if (rafId !== null) cancelAnimationFrame(rafId);
+      engine.dispose();
+      engineRef.current = null;
     };
-  }, [columns, segments, width, colors]);
+  }, [waiting, colors]);
+
+  useEffect(() => {
+    engineRef.current?.resize(width, animate);
+  }, [waiting, colors, width, animate]);
+
+  useEffect(() => {
+    engineRef.current?.setSegments(segments);
+  }, [waiting, colors, segments]);
+
+  useEffect(() => {
+    engineRef.current?.applySnapshot(pieces.runs, pieces.num_pieces);
+  }, [waiting, colors, width, animate, pieces.runs, pieces.num_pieces]);
+
+  // Pieces arrive live while the torrent is downloading and the bar is
+  // animating. Otherwise the once-a-second snapshot is enough.
+  usePieceStream(hash, animate && !waiting && progress < 1, {
+    onUpdate: (u) => engineRef.current?.onStream(u),
+    onLive: (live) => engineRef.current?.setStreamLive(live),
+  });
+
+  const barHeight = animate ? 70 : 22;
 
   // Tooltip state. Positioned via absolute CSS over the canvas parent.
   const [tooltip, setTooltip] = useState<{
@@ -257,7 +123,6 @@ export default function PieceBar({ pieces, files, progress }: PieceBarProps) {
   }
 
   const completePct = Math.round(progress * 100);
-  const waiting = pieces.num_pieces === 0;
 
   return (
     <div>
@@ -290,8 +155,7 @@ export default function PieceBar({ pieces, files, progress }: PieceBarProps) {
             style={{
               display: "block",
               width: "100%",
-              height: BAR_HEIGHT,
-              borderRadius: 3,
+              height: barHeight,
               cursor: segments.length > 0 ? "crosshair" : "default",
             }}
           />
@@ -299,7 +163,7 @@ export default function PieceBar({ pieces, files, progress }: PieceBarProps) {
         {waiting && (
           <div
             style={{
-              height: BAR_HEIGHT,
+              height: barHeight,
               background: "var(--color-bg-subtle)",
               borderRadius: 3,
               display: "flex",
@@ -318,7 +182,7 @@ export default function PieceBar({ pieces, files, progress }: PieceBarProps) {
             style={{
               position: "absolute",
               left: Math.min(Math.max(tooltip.x - 80, 0), width - 160),
-              top: BAR_HEIGHT + 6,
+              top: barHeight + 6,
               padding: "6px 10px",
               background: "var(--color-bg-elevated)",
               border: "1px solid var(--color-border-default)",
