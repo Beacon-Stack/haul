@@ -188,7 +188,7 @@ export default function TorrentDetail() {
           count={pieces.num_pieces > 0 ? pieces.num_pieces.toLocaleString() : undefined}
           defaultOpen={t.progress < 1}
         >
-          <PieceBar pieces={pieces} files={files ?? []} progress={t.progress} />
+          <PieceBar hash={hash ?? ""} pieces={pieces} files={files ?? []} progress={t.progress} />
         </CollapsibleSection>
       )}
 

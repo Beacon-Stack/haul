@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   Wifi, Download, Upload,
-  Zap, Shield, Clock, Monitor, Moon, Sun, Check,
+  Zap, Shield, Clock, Monitor, Moon, Sun, Check, Sparkles,
 } from "lucide-react";
 import { useSettingsForm, SaveButton, ToggleRow, FieldRow } from "@/components/settings/SettingsForm";
 import {
@@ -13,6 +13,7 @@ import {
   setThemePreset,
 } from "@/theme";
 import type { ThemeMode } from "@/theme";
+import { setPieceAnimation, usePieceAnimation } from "@/lib/displayPrefs";
 import Security from "@beacon-shared/Security";
 
 // Appearance
@@ -199,6 +200,22 @@ function SectionCard({ title, icon: Icon, children, advanced }: {
 
 // Disk-scale formatter: the dashboard cares about GB/TB, not KB.
 
+// Animations: kept in this browser, like the theme, so it applies at once
+// and needs no Save.
+function AnimationSection() {
+  const pieceAnimation = usePieceAnimation();
+  return (
+    <SectionCard title="Animations" icon={Sparkles}>
+      <ToggleRow
+        label="Animate the piece bar"
+        description="On a torrent's page, show each piece dropping into place as it finishes. Off shows a plain bar that fills in. Saved in this browser."
+        checked={pieceAnimation}
+        onChange={setPieceAnimation}
+      />
+    </SectionCard>
+  );
+}
+
 // Settings Page
 
 export default function SettingsPage() {
@@ -220,6 +237,9 @@ export default function SettingsPage() {
 
         {/* Appearance */}
         <AppearanceSection />
+
+        {/* Animations */}
+        <AnimationSection />
 
         {/* Row 1: Downloads + Speed */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, alignItems: "start" }}>
